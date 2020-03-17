@@ -1,0 +1,10 @@
+Package: pandemic
+Type: Package
+Title: pandemic plot for hospital beds
+Version: 0.1.1
+Date: 2020-03-17
+Author: Brian S. Yandell
+Maintainer: Brian S. Yandell <byandell@wisc.edu>
+Description: Pandemic plot of cases and beds
+License: GPL-3
+LazyData: TRUE
