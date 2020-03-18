@@ -134,7 +134,8 @@ ui <- fluidPage(
       textOutput("jhudata"),
       uiOutput("jhusource"),
       textOutput("space2"),
-      uiOutput("sourceurl")
+      uiOutput("sourceurl"),
+      uiOutput("dslist")
     )
   )
 )
@@ -253,6 +254,11 @@ server <- function(input, output) {
                  href="https://github.com/CSSEGISandData/COVID-19")
   output$jhusource <- renderUI({
     tagList("Data URL:", sourcejhu)
+  })
+  dslist <- a("https://datascience.wisc.edu/covid19", 
+                 href="https://datascience.wisc.edu/covid19")
+  output$dslist <- renderUI({
+    tagList("Data Science Links:", dslist)
   })
 }
 
