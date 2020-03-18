@@ -177,6 +177,7 @@ ui <- fluidPage(
       textOutput("jhudata"),
       uiOutput("jhusource"),
       uiOutput("testsource"),
+      uiOutput("pointacres"),
       textOutput("space2"),
       uiOutput("sourceurl"),
       uiOutput("epilist"),
@@ -398,6 +399,12 @@ server <- function(input, output) {
                  href="https://covidtracking.com/api/")
   output$testsource <- renderUI({
     tagList("COVID Testing Project URL:", sourcetest)
+  })
+  
+  pointacres <- a("https://coronavirus.1point3acres.com/en", 
+                  href="https://coronavirus.1point3acres.com/en")
+  output$pointacres <- renderUI({
+    tagList("1Point3Acres Real Time County Updates URL:", pointacres)
   })
   
   epilist <- a("https://go.wisc.edu/a1832f", 
