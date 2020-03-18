@@ -13,7 +13,7 @@ double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
     mutate(days = seq_along(dates) - 1,
            Actual = case0 * 2 ^ (days / doubling),
            Confirmed = Actual / hidden,
-           Hospitalized = Actual / hospitalizing,
+           Hospitalized = Actual * hospitalizing / 100,
            Max_Beds = bedmax) %>%
     pivot_longer(Actual:Max_Beds,
                  names_to = "Cases",
@@ -179,6 +179,7 @@ ui <- fluidPage(
       uiOutput("testsource"),
       textOutput("space2"),
       uiOutput("sourceurl"),
+      uiOutput("epilist"),
       uiOutput("dslist")
     )
   )
@@ -399,10 +400,15 @@ server <- function(input, output) {
     tagList("COVID Testing Project URL:", sourcetest)
   })
   
+  epilist <- a("https://go.wisc.edu/a1832f", 
+              href="https://go.wisc.edu/a1832f")
+  output$epilist <- renderUI({
+    tagList("Epidemiology Models & Data for Coronavirus:", epilist)
+  })
   dslist <- a("https://datascience.wisc.edu/covid19", 
                  href="https://datascience.wisc.edu/covid19")
   output$dslist <- renderUI({
-    tagList("Data Science Links:", dslist)
+    tagList("COVID-19 Data Science Links:", dslist)
   })
 }
 
