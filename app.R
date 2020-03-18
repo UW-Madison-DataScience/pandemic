@@ -38,11 +38,13 @@ real_cases_state <- function() {
            Region = "Country/Region") %>%
     pivot_longer(-(Type:Long), names_to = "Date", values_to = "Count") %>%
     mutate(Date = as.POSIXct(Date, format="%m/%d/%y")) %>%
-    mutate(State = ifelse(str_detect(State, ","), str_remove(State, "^.*, "), State),
+    mutate(County = "",
+           County = ifelse(str_detect(State, ","), str_remove(State, ",.*$"), County),
+           State = ifelse(str_detect(State, ","), str_remove(State, "^.*, "), State),
            State = ifelse(State %in% state.name, 
                           state.abb[match(State, state.name)], 
                           State)) %>%
-    group_by(Type, State, Region, Date) %>%
+    group_by(Type, County, State, Region, Date) %>%
     summarize(Count = sum(Count)) %>%
     ungroup
 }
