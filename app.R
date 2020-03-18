@@ -116,7 +116,7 @@ ui <- fluidPage(
         sidebarPanel(
         # Input: Slider for initial settings and rates
         sliderInput("Confirmed0", "Confirmed:", 0, 100, 10),
-        sliderInput("doubling", "Days to Double:", 1, 10, 6, 1),
+        sliderInput("doubling", "Days to Double:", 0, 100, 6, 1),
         sliderInput("hospitalizing", "Percent Hospitalized:", 0, 100, 10),
         sliderInput("hidden", "Hidden per Confirmed:", 1, 10, 4),
         sliderInput("bedmax", "Maximum Hospital Beds:", 0, 5000, 1000),
