@@ -171,14 +171,22 @@ ui <- fluidPage(
       textOutput("testinfo")
     ),
     tabPanel("References",
+      textOutput("summary"),
+      textOutput("space"),
+      textOutput("summary1"),
       textOutput("main_text"),
       uiOutput("url"),
-      textOutput("space"),
+      textOutput("space1"),
+      textOutput("summary2"),
       textOutput("jhudata"),
       uiOutput("jhusource"),
-      uiOutput("testsource"),
-      uiOutput("pointacres"),
       textOutput("space2"),
+      textOutput("summary3"),
+      uiOutput("testsource"),
+      textOutput("summary4"),
+      textOutput("space3"),
+      uiOutput("pointacres"),
+      textOutput("space4"),
       uiOutput("sourceurl"),
       uiOutput("epilist"),
       uiOutput("dslist")
@@ -382,8 +390,11 @@ server <- function(input, output) {
     p
   })
 
-  output$space <- renderText(" ")
-  output$space2 <- renderText(" ")
+  output$space <- renderText("---")
+  output$space1 <- renderText("---")
+  output$space2 <- renderText("---")
+  output$space3 <- renderText("---")
+  output$space4 <- renderText("---")
   output$jhudata <- renderText(
     "Real cases come from Johns Hopkins U Center for Systems Science and Engineering."
   )
@@ -417,6 +428,28 @@ server <- function(input, output) {
   output$dslist <- renderUI({
     tagList("COVID-19 Data Science Links:", dslist)
   })
+  
+  output$summary <- renderText({
+    'Our human challenge is how to grasp concepts of exponential growth, latency (lag time) and carrying capacity (of hospitals),
+    when all are involved in this unfolding pandemic. Here is a narrative for this app.'})
+  output$summary1 <- renderText({
+    '"Simulation" tab is based on "Simple Math, Alarming Answers",
+    assuming exponential growth of cases,
+    and proportionality between number of confirmed cases,
+    number of actual cases and number of hospital beds.
+    Does our community have enough hospital beds?'})
+  output$summary2 <- renderText({
+    '"Real Cases" tab draws on Johns Hopkins U CSSE, which many apps are using.
+    What I added beyond the interactive visuals is an estimate of the exponential rate
+    for confirmed cases
+    (dashed lines if you click the “Add predict lines?” box),
+    putting heavier weight on the most recent days to reflect changing habits and patterns.
+    Note the counts on most recent day and the estimating doubling time in days.'})
+  output$summary3 <- renderText({
+    '"Testing" tab reflects new data from COVID Testing Project.'})
+  output$summary4 <- renderText({
+    'Be sure to look at the "1Point3Acres" site, which compiles real time county data;
+    hope to have that here eventually.'})
 }
 
 shinyApp(ui, server)
