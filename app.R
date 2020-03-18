@@ -158,8 +158,8 @@ ui <- fluidPage(
       )
     ),
     tabPanel("Testing",
+      plotOutput("testplot"),
       radioButtons("testgroup", "", c("States","US"), inline = TRUE),
-      selectInput("testscale", "Plot Scale:", c("raw","geometric")),
       conditionalPanel(
         condition = 'input.testgroup == "States"',
         selectInput("teststate", "States:", 
@@ -167,7 +167,7 @@ ui <- fluidPage(
                     c("WI","MI","IL","IA"),
                     multiple = TRUE)
       ),
-      plotOutput("testplot"),
+      selectInput("testscale", "Plot Scale:", c("raw","geometric")),
       textOutput("testinfo")
     ),
     tabPanel("References",
