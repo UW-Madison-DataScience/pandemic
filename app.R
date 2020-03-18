@@ -20,7 +20,7 @@ double_cases <- function(confirmed0, doubling, actual, hidden, hospitalizing,
                  values_to = "Count")
 }
 
-real_cases_state <- function() {
+real_cases_county <- function() {
   dirpath <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series"
 
   bind_rows(
@@ -46,31 +46,47 @@ real_cases_state <- function() {
                           State)) %>%
     group_by(Type, County, State, Region, Date) %>%
     summarize(Count = sum(Count)) %>%
-    ungroup
+    ungroup %>%
+    weight_date()
 }
-real_cases <- function(cases_state) {
+
+weight_date <- function(cases_state) {
+  # Add weights skewed toward most recent dates.
+  skew <- 20
+  sweight <- as.numeric(unique(cases_state$Date))
+  mweight <- min(sweight)
+  eweight <- as.numeric(sweight - mweight)
+  sweight <- max(eweight)
+  eweight <- max(exp(skew * eweight / sweight))
+  
+  # Add weights to states
   cases_state %>%
-    group_by(Type, Region, Date) %>%
+    mutate(Weight = as.numeric(Date - mweight) / sweight) %>%
+    mutate(Weight = exp(skew * Weight) / eweight)
+}
+
+real_cases_state <- function(cases_state) {
+  # Sum within Regions
+  cases_state %>%
+    group_by(Type, Region, State, Date, Weight) %>%
     summarize(Count = sum(Count)) %>%
     ungroup
 }
 
-cases_state <- real_cases_state()
+real_cases <- function(cases_state) {
+  # Sum within Regions
+  cases_state %>%
+    group_by(Type, Region, Date, Weight) %>%
+    summarize(Count = sum(Count)) %>%
+    ungroup
+}
 
-# Add weights skewed toward most recent dates.
-skew <- 20
-sweight <- as.numeric(unique(cases_state$Date))
-eweight <- as.numeric(sweight - min(sweight))
-sweight <- max(eweight)
-eweight <- max(exp(skew * eweight / sweight))
-cases_state <- cases_state %>%
-  mutate(weight = as.numeric(Date - min(Date)) / sweight) %>%
-  mutate(weight = exp(skew * weight) / eweight)
-
-cases <- real_cases(cases_state) %>%
-  mutate(weight = as.numeric(Date - min(Date)) / sweight) %>%
-  mutate(weight = exp(skew * weight) / eweight)
-
+cases_county <- real_cases_county()
+cases_state <- real_cases_state(cases_county)
+cases_county <- cases_county %>%
+  filter(State == "WI")
+counties <- sort(unique(cases_county$County))
+cases <- real_cases(cases_state)
 regions <- sort(unique(cases$Region))
 cases_state <- cases_state %>%
   filter(Region == "US")
@@ -124,7 +140,9 @@ ui <- fluidPage(
           checkboxInput("predict", "Add predict lines?", FALSE)
         ),
         mainPanel(
-          plotOutput(outputId = "case_plot"))
+          plotOutput(outputId = "case_plot"),
+          textOutput("latest"),
+          tableOutput("fitcase"))
       )
     ),
     tabPanel("Reference",
@@ -190,28 +208,18 @@ server <- function(input, output) {
   Slowing the days to double by social distancing buys time. Adjust sliders to view changes."
   )
 
+  # Plot real cases.
   output$case_plot <- renderPlot({
     req(input$states, input$casetypes)
-    if(input$states == "States") {
-      req(input$state)
-      unitnames <- input$state
-      p <- ggplot(cases_state %>% 
-                    filter(Type == input$casetypes, Count > 0, 
-                           Region == "US", State %in% input$state))
-    } else {
-      req(input$country)
-      unitnames <- input$country
-      p <- ggplot(cases %>% 
-                    filter(Type == input$casetypes, Count > 0,
-                           Region %in% input$country))
-    }
+    p <- ggplot(cases_reactive() %>% 
+                  filter(Count > 0, Type == input$casetypes))
     p <- p +
       aes(Date, Count) +
       geom_line(size = 2) +
       ggtitle(paste(input$casetypes, "cases"))
     
     
-    if(length(unitnames) > 1) {
+    if(length(units_reactive()) > 1) {
       if(input$states == "States") {
         p <- p +
           aes(col = State, z = State)
@@ -228,12 +236,14 @@ server <- function(input, output) {
     if(isTruthy(input$predict)) {
       if(input$states == "States") {
         p <- p + 
-          geom_smooth(method="glm", mapping = aes(weight = weight), se = FALSE,
+          geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
+                      formula = y ~ x,
                       method.args = list(family = "poisson"),
                       linetype = "dashed")
       } else {
         p <- p + 
-          geom_smooth(method="glm", mapping = aes(weight = weight), se = FALSE,
+          geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
+                      formula = y ~ x,
                       method.args = list(family = "poisson"),
                       linetype = "dashed")
       }
@@ -243,6 +253,51 @@ server <- function(input, output) {
         scale_y_log10()
     }
     suppressWarnings(p)
+  })
+  
+  units_reactive <- reactive({
+    switch(
+      req(input$states),
+      States = {
+        req(input$state)
+      },
+      Countries = {
+        req(input$country)
+      })
+  })
+  cases_reactive <- reactive({
+    switch(
+      req(input$states),
+      States = {
+        cases_state %>% 
+          filter(Region == "US", 
+                 State %in% units_reactive())
+      },
+      Countries = {
+        cases %>% 
+          filter(Region %in% units_reactive())
+      })
+  })
+  
+  output$latest <- renderText({as.character(max(cases_reactive()$Date))})
+  # Fit line for real cases.
+  output$fitcase <- renderTable({
+    req(input$states, input$casetypes)
+    if(input$states == "States") {
+      cases_reactive() %>% 
+        filter(Date == max(Date)) %>%
+        arrange(State) %>%
+        select(Type, Region, State, Count) %>%
+        mutate(Count = as.integer(Count)) %>%
+        pivot_wider(names_from = Type, values_from = Count)
+    } else {
+      cases_reactive() %>% 
+        filter(Date == max(Date)) %>%
+        arrange(Region) %>%
+        select(Type, Region, Count) %>%
+        mutate(Count = as.integer(Count)) %>%
+        pivot_wider(names_from = Type, values_from = Count)
+    }
   })
 
   output$space <- renderText(" ")
