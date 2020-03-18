@@ -25,11 +25,14 @@ real_cases_state <- function() {
 
   bind_rows(
     confirmed = read_csv(
-      file.path(dirpath, "time_series_19-covid-Confirmed.csv")),
+      file.path(dirpath, "time_series_19-covid-Confirmed.csv"),
+      col_types = cols()),
     death = read_csv(
-      file.path(dirpath, "time_series_19-covid-Deaths.csv")),
+      file.path(dirpath, "time_series_19-covid-Deaths.csv"),
+      col_types = cols()),
     recovered = read_csv(
-      file.path(dirpath, "time_series_19-covid-Recovered.csv")),
+      file.path(dirpath, "time_series_19-covid-Recovered.csv"),
+      col_types = cols()),
     .id = "Type") %>%
     rename(State = "Province/State",
            Region = "Country/Region") %>%
@@ -44,15 +47,31 @@ real_cases_state <- function() {
     ungroup
 }
 real_cases <- function(cases_state) {
-cases_state %>%
+  cases_state %>%
     group_by(Type, Region, Date) %>%
     summarize(Count = sum(Count)) %>%
     ungroup
 }
 
 cases_state <- real_cases_state()
-cases <- real_cases(cases_state)
+
+# Add weights skewed toward most recent dates.
+skew <- 20
+sweight <- as.numeric(unique(cases_state$Date))
+eweight <- as.numeric(sweight - min(sweight))
+sweight <- max(eweight)
+eweight <- max(exp(skew * eweight / sweight))
+cases_state <- cases_state %>%
+  mutate(weight = as.numeric(Date - min(Date)) / sweight) %>%
+  mutate(weight = exp(skew * weight) / eweight)
+
+cases <- real_cases(cases_state) %>%
+  mutate(weight = as.numeric(Date - min(Date)) / sweight) %>%
+  mutate(weight = exp(skew * weight) / eweight)
+
 regions <- sort(unique(cases$Region))
+cases_state <- cases_state %>%
+  filter(Region == "US")
 
 # Define UI for miles per gallon app ----
 ui <- fluidPage(
@@ -67,7 +86,7 @@ ui <- fluidPage(
         sidebarPanel(
         # Input: Slider for initial settings and rates
         sliderInput("confirmed0", "Confirmed:", 0, 100, 10),
-        sliderInput("doubling", "Days to Double:", 4, 10, 6),
+        sliderInput("doubling", "Days to Double:", 1, 10, 6, 1),
         sliderInput("hospitalizing", "Percent Hospitalized:", 0, 100, 10),
         sliderInput("hidden", "Hidden per Confirmed:", 1, 10, 4),
         sliderInput("bedmax", "Maximum Hospital Beds:", 0, 5000, 1000),
@@ -99,7 +118,8 @@ ui <- fluidPage(
           ),
           radioButtons("states", "", c("States","Countries")),
           selectInput("casetypes", "Cases:", c("confirmed","death","recovered")),
-          selectInput("realscale", "Plot Scale:", c("raw","geometric"))
+          selectInput("realscale", "Plot Scale:", c("raw","geometric")),
+          checkboxInput("predict", "Add predict lines?", FALSE)
         ),
         mainPanel(
           plotOutput(outputId = "case_plot"))
@@ -155,7 +175,7 @@ server <- function(input, output) {
       p <- p +
         ylim(0, 5 * input$bedmax / 1000)
     }
-    p
+    suppressWarnings(p)
   })
   
   output$extra_text <- renderText(
@@ -187,24 +207,39 @@ server <- function(input, output) {
       geom_line(size = 2) +
       ggtitle(paste(input$casetypes, "cases"))
     
+    
     if(length(unitnames) > 1) {
       if(input$states == "States") {
         p <- p +
-          aes(col = State)
+          aes(col = State, z = State)
         
       } else {
         p <- p +
-          aes(col = Region)
+          aes(col = Region, z = Region)
       }
     } else {
       p <- p +
         theme(legend.position = "none")
     }
+
+    if(isTruthy(input$predict)) {
+      if(input$states == "States") {
+        p <- p + 
+          geom_smooth(method="glm", mapping = aes(weight = weight), se = FALSE,
+                      method.args = list(family = "poisson"),
+                      linetype = "dashed")
+      } else {
+        p <- p + 
+          geom_smooth(method="glm", mapping = aes(weight = weight), se = FALSE,
+                      method.args = list(family = "poisson"),
+                      linetype = "dashed")
+      }
+    }
     if(input$realscale == "geometric") {
       p <- p +
         scale_y_log10()
     }
-    p
+    suppressWarnings(p)
   })
 
   output$space <- renderText(" ")

@@ -8,3 +8,8 @@ app.R
 ```
 
 This app is now live at <https://brianyandell.shinyapps.io/pandemic/>.
+It was deployed using 
+
+```
+rsconnect::deployApp(appFiles = "app.R")
+```
