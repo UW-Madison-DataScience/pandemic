@@ -5,9 +5,9 @@ library(tidyr)
 library(stringr)
 library(readr)
 
-double_cases <- function(confirmed0, doubling, actual, hidden, hospitalizing,
+double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
                          bedmax) {
-  case0 <- confirmed0 * hidden
+  case0 <- Confirmed0 * hidden
   tibble(
     dates = seq(as.Date("2020-03-16"), as.Date("2020-06-01"), by="days")) %>%
     mutate(days = seq_along(dates) - 1,
@@ -24,13 +24,13 @@ real_cases_county <- function() {
   dirpath <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series"
 
   bind_rows(
-    confirmed = read_csv(
+    Confirmed = read_csv(
       file.path(dirpath, "time_series_19-covid-Confirmed.csv"),
       col_types = cols()),
-    death = read_csv(
+    Death = read_csv(
       file.path(dirpath, "time_series_19-covid-Deaths.csv"),
       col_types = cols()),
-    recovered = read_csv(
+    Recovered = read_csv(
       file.path(dirpath, "time_series_19-covid-Recovered.csv"),
       col_types = cols()),
     .id = "Type") %>%
@@ -38,7 +38,7 @@ real_cases_county <- function() {
            Region = "Country/Region") %>%
     pivot_longer(-(Type:Long), names_to = "Date", values_to = "Count") %>%
     mutate(Date = as.POSIXct(Date, format="%m/%d/%y")) %>%
-    mutate(County = "",
+    mutate(County = "All",
            County = ifelse(str_detect(State, ","), str_remove(State, ",.*$"), County),
            State = ifelse(str_detect(State, ","), str_remove(State, "^.*, "), State),
            State = ifelse(State %in% state.name, 
@@ -103,7 +103,7 @@ ui <- fluidPage(
       sidebarLayout(
         sidebarPanel(
         # Input: Slider for initial settings and rates
-        sliderInput("confirmed0", "Confirmed:", 0, 100, 10),
+        sliderInput("Confirmed0", "Confirmed:", 0, 100, 10),
         sliderInput("doubling", "Days to Double:", 1, 10, 6, 1),
         sliderInput("hospitalizing", "Percent Hospitalized:", 0, 100, 10),
         sliderInput("hidden", "Hidden per Confirmed:", 1, 10, 4),
@@ -135,7 +135,7 @@ ui <- fluidPage(
                         multiple = TRUE)
           ),
           radioButtons("states", "", c("States","Countries")),
-          selectInput("casetypes", "Cases:", c("confirmed","death","recovered")),
+          selectInput("casetypes", "Cases:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric")),
           checkboxInput("predict", "Add predict lines?", FALSE)
         ),
@@ -177,7 +177,7 @@ server <- function(input, output) {
   
   output$main_plot <- renderPlot({
     
-    dat <- double_cases(input$confirmed0,
+    dat <- double_cases(input$Confirmed0,
                         input$doubling, 
                         input$actual,
                         input$hidden,
@@ -200,7 +200,7 @@ server <- function(input, output) {
   })
   
   output$extra_text <- renderText(
-  "Consider a community with ~500K people and ~2K beds. On 16 March 2020, there were 10 confirmed cases, which might represent 40 actual cases. 
+  "Consider a community with ~500K people and ~2K beds. Suppose on 16 March 2020, there were 10 confirmed cases, which might represent 40 actual cases. 
   Consider a doubling every 6 days. Say 10% need hospitalization, which is only 4 at that time. By 1 April, that could jump to 60 confirmed cases, 250 actual cases, and 25 needing hospital beds. Doesn’t seem so bad, but the next jump is huge.
   By 1 May, there would be over 2000 confirmed cases of 8000+ actual cases, with 800+ needing hospitalization.
   Still manageable. However, by 1 June, there would be 70,000+ confirmed cases, ~300K actual cases (over half of the community),
@@ -259,10 +259,10 @@ server <- function(input, output) {
     switch(
       req(input$states),
       States = {
-        req(input$state)
+        sort(req(input$state))
       },
       Countries = {
-        req(input$country)
+        sort(req(input$country))
       })
   })
   cases_reactive <- reactive({
@@ -283,20 +283,50 @@ server <- function(input, output) {
   # Fit line for real cases.
   output$fitcase <- renderTable({
     req(input$states, input$casetypes)
+    
+    # Get estimate doubling rate
+    if(length(units_reactive() > 1)) {
+      switch(
+        req(input$states),
+        States = {
+          form <- formula(Count ~ Date * State)
+        },
+        Countries = {
+          form <- formula(Count ~ Date * Region)
+        })
+      fit <- glm(form, cases_reactive(),
+          weight = Weight, family = "poisson")
+      coefs <- coef(fit)
+      coefs <- coefs[str_detect(names(coefs), "Date")]
+      coefs[-1] <- coefs[-1] + coefs[1]
+      names(coefs) <- units_reactive()
+    } else {
+      form <- formula(Count ~ Date)
+      fit <- glm(form, cases_reactive(),
+                 weight = Weight, family = "poisson")
+      coefs <- coef(fit)
+      coefs <- coefs[str_detect(names(coefs), "Date")]
+      names(coefs) <- units_reactive()
+    }
+    doubling <- log(2) / coefs / 86400
+    
+    # Get last date.
     if(input$states == "States") {
       cases_reactive() %>% 
         filter(Date == max(Date)) %>%
         arrange(State) %>%
         select(Type, Region, State, Count) %>%
         mutate(Count = as.integer(Count)) %>%
-        pivot_wider(names_from = Type, values_from = Count)
+        pivot_wider(names_from = Type, values_from = Count) %>%
+        mutate(Doubling = doubling)
     } else {
       cases_reactive() %>% 
         filter(Date == max(Date)) %>%
         arrange(Region) %>%
         select(Type, Region, Count) %>%
         mutate(Count = as.integer(Count)) %>%
-        pivot_wider(names_from = Type, values_from = Count)
+        pivot_wider(names_from = Type, values_from = Count) %>%
+        mutate(Doubling = doubling)
     }
   })
 
