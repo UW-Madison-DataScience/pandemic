@@ -91,6 +91,18 @@ regions <- sort(unique(cases$Region))
 cases_state <- cases_state %>%
   filter(Region == "US")
 
+# Testing in US
+test_us <- read_csv("https://covidtracking.com/api/us/daily.csv",
+                    col_types = cols()) %>%
+  mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
+  pivot_longer(positive:total, names_to = "status", values_to = "count")
+test_st <- read_csv("http://covidtracking.com/api/states/daily.csv",
+                    col_types = cols()) %>%
+  mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
+  pivot_longer(positive:total, names_to = "status", values_to = "count")
+
+##########################################################################33
+
 # Define UI for miles per gallon app ----
 ui <- fluidPage(
   
@@ -134,7 +146,7 @@ ui <- fluidPage(
                         c("WI","MI","IL","IA"),
                         multiple = TRUE)
           ),
-          radioButtons("states", "", c("States","Countries")),
+          radioButtons("states", "", c("States","Countries"), inline = TRUE),
           selectInput("casetypes", "Cases:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric")),
           checkboxInput("predict", "Add predict lines?", FALSE)
@@ -145,12 +157,26 @@ ui <- fluidPage(
           tableOutput("fitcase"))
       )
     ),
-    tabPanel("Reference",
+    tabPanel("Testing",
+      radioButtons("testgroup", "", c("States","US"), inline = TRUE),
+      selectInput("testscale", "Plot Scale:", c("raw","geometric")),
+      conditionalPanel(
+        condition = 'input.testgroup == "States"',
+        selectInput("teststate", "States:", 
+                    state.abb,
+                    c("WI","MI","IL","IA"),
+                    multiple = TRUE)
+      ),
+      plotOutput("testplot"),
+      textOutput("testinfo")
+    ),
+    tabPanel("References",
       textOutput("main_text"),
       uiOutput("url"),
       textOutput("space"),
       textOutput("jhudata"),
       uiOutput("jhusource"),
+      uiOutput("testsource"),
       textOutput("space2"),
       uiOutput("sourceurl"),
       uiOutput("dslist")
@@ -329,6 +355,30 @@ server <- function(input, output) {
         mutate(Doubling = doubling)
     }
   })
+  
+  output$testplot <- renderPlot({
+    req(input$teststate)
+    switch(
+        req(input$testgroup),
+        States = {
+          p <- ggplot(test_st %>% 
+                        filter(count > 0 & !is.na(count),
+                               state %in% input$teststate)) +
+            aes(date, count, col = state) +
+            facet_wrap(~ status, scales = "free_y")
+        },
+        US = {
+          p <- ggplot(test_us) +
+            aes(date, count, col = status)
+        })
+    p <- p +
+      geom_line(size = 2)
+    if(input$testscale == "geometric") {
+      p <- p +
+        scale_y_log10()
+    }
+    p
+  })
 
   output$space <- renderText(" ")
   output$space2 <- renderText(" ")
@@ -338,8 +388,17 @@ server <- function(input, output) {
   sourcejhu <- a("https://github.com/CSSEGISandData/COVID-19", 
                  href="https://github.com/CSSEGISandData/COVID-19")
   output$jhusource <- renderUI({
-    tagList("Data URL:", sourcejhu)
+    tagList("JHU CSSE Data URL:", sourcejhu)
   })
+  output$testinfo <- renderText(
+    "Test data compiled by COVID Testing Project."
+  )
+  sourcetest <- a("https://covidtracking.com/api/", 
+                 href="https://covidtracking.com/api/")
+  output$testsource <- renderUI({
+    tagList("COVID Testing Project URL:", sourcetest)
+  })
+  
   dslist <- a("https://datascience.wisc.edu/covid19", 
                  href="https://datascience.wisc.edu/covid19")
   output$dslist <- renderUI({
