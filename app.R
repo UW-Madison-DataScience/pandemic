@@ -138,7 +138,8 @@ ui <- fluidPage(
         mainPanel(
           plotOutput(outputId = "case_plot"),
           textOutput("latest"),
-          tableOutput("fitcase"))
+          tableOutput("fitcase"),
+          uiOutput("onep3"))
       )
     ),
     tabPanel("Testing",
@@ -168,7 +169,8 @@ ui <- fluidPage(
                
                mainPanel(
                  plotOutput(outputId = "main_plot"),
-                 uiOutput("onep3"),
+                 uiOutput("simpenn"),
+                 textOutput("space5"),
                  textOutput(outputId = "extra_text")
                )
              )
@@ -404,6 +406,7 @@ server <- function(input, output) {
   output$space2 <- renderText("---")
   output$space3 <- renderText("---")
   output$space4 <- renderText("---")
+  output$space5 <- renderText("---")
   output$jhudata <- renderText(
     "Real cases come from Johns Hopkins U Center for Systems Science and Engineering."
   )
@@ -430,7 +433,7 @@ server <- function(input, output) {
     tagList("1Point3Acres Real Time County Updates URL:", pointacres)
   })
   output$onep3 <- renderUI({
-    tagList("See the more extensive Susceptible-Infected-Recovered model 1Point3Acres:", pointacres)
+    tagList("See", pointacres, "for county updates.")
   })
   
   # U Penn Medicine
@@ -438,6 +441,9 @@ server <- function(input, output) {
                   href="http://penn-chime.phl.io/")
   output$pennmed <- renderUI({
     tagList("U Penn Medicine CHIME URL:", pennmed)
+  })
+  output$simpenn <- renderUI({
+    tagList("See", pennmed, "for better Susceptible-Infected-Recovered CHIME simulations.")
   })
   
   # Yandell files
