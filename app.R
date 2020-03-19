@@ -95,11 +95,13 @@ cases_state <- cases_state %>%
 test_us <- read_csv("https://covidtracking.com/api/us/daily.csv",
                     col_types = cols()) %>%
   mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
-  pivot_longer(positive:total, names_to = "status", values_to = "count")
+  pivot_longer(positive:total, names_to = "status", values_to = "count") %>%
+  filter(status != "death")
 test_st <- read_csv("http://covidtracking.com/api/states/daily.csv",
                     col_types = cols()) %>%
   mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
-  pivot_longer(positive:total, names_to = "status", values_to = "count")
+  pivot_longer(positive:total, names_to = "status", values_to = "count") %>%
+  filter(status != "death")
 
 ##########################################################################33
 
@@ -111,24 +113,6 @@ ui <- fluidPage(
   
   # Sidebar panel for inputs ----
   tabsetPanel(
-    tabPanel("Simulation",
-      sidebarLayout(
-        sidebarPanel(
-        # Input: Slider for initial settings and rates
-        sliderInput("Confirmed0", "Confirmed:", 0, 100, 10),
-        sliderInput("doubling", "Days to Double:", 0, 100, 6, 1),
-        sliderInput("hospitalizing", "Percent Hospitalized:", 0, 100, 10),
-        sliderInput("hidden", "Hidden per Confirmed:", 1, 10, 4),
-        sliderInput("bedmax", "Maximum Hospital Beds:", 0, 5000, 1000),
-        selectInput("scale", "Plot Scale:", c("raw","geometric"))
-        ),
-
-        mainPanel(
-          plotOutput(outputId = "main_plot"),
-          textOutput(outputId = "extra_text")
-        )
-      )
-    ),
     tabPanel("Real Cases",
       sidebarLayout(
         sidebarPanel(
@@ -170,22 +154,47 @@ ui <- fluidPage(
       selectInput("testscale", "Plot Scale:", c("raw","geometric")),
       textOutput("testinfo")
     ),
+    tabPanel("Simulations",
+             sidebarLayout(
+               sidebarPanel(
+                 # Input: Slider for initial settings and rates
+                 sliderInput("Confirmed0", "Confirmed:", 0, 100, 10),
+                 sliderInput("doubling", "Days to Double:", 0, 100, 6, 1),
+                 sliderInput("hospitalizing", "Percent Hospitalized:", 0, 100, 10),
+                 sliderInput("hidden", "Hidden per Confirmed:", 1, 10, 4),
+                 sliderInput("bedmax", "Maximum Hospital Beds:", 0, 5000, 1000),
+                 selectInput("scale", "Plot Scale:", c("raw","geometric"))
+               ),
+               
+               mainPanel(
+                 plotOutput(outputId = "main_plot"),
+                 uiOutput("onep3"),
+                 textOutput(outputId = "extra_text")
+               )
+             )
+    ),
     tabPanel("References",
       textOutput("summary"),
+      
       textOutput("space"),
       textOutput("summary1"),
       textOutput("main_text"),
       uiOutput("url"),
+      
       textOutput("space1"),
       textOutput("summary2"),
       textOutput("jhudata"),
       uiOutput("jhusource"),
+      
       textOutput("space2"),
       textOutput("summary3"),
       uiOutput("testsource"),
       textOutput("summary4"),
+      
       textOutput("space3"),
       uiOutput("pointacres"),
+      uiOutput("pennmed"),
+      
       textOutput("space4"),
       uiOutput("sourceurl"),
       uiOutput("epilist"),
@@ -398,7 +407,7 @@ server <- function(input, output) {
   output$jhudata <- renderText(
     "Real cases come from Johns Hopkins U Center for Systems Science and Engineering."
   )
-  sourcejhu <- a("https://github.com/CSSEGISandData/COVID-19", 
+  sourcejhu <- a("github.com/CSSEGISandData/COVID-19", 
                  href="https://github.com/CSSEGISandData/COVID-19")
   output$jhusource <- renderUI({
     tagList("JHU CSSE Data URL:", sourcejhu)
@@ -406,24 +415,38 @@ server <- function(input, output) {
   output$testinfo <- renderText(
     "Test data compiled by COVID Testing Project."
   )
-  sourcetest <- a("https://covidtracking.com/api/", 
+  
+  # COVID Testing Project site
+  sourcetest <- a("covidtracking.com/api/", 
                  href="https://covidtracking.com/api/")
   output$testsource <- renderUI({
     tagList("COVID Testing Project URL:", sourcetest)
   })
   
-  pointacres <- a("https://coronavirus.1point3acres.com/en", 
+  # 1Point3Acres site
+  pointacres <- a("coronavirus.1point3acres.com/en", 
                   href="https://coronavirus.1point3acres.com/en")
   output$pointacres <- renderUI({
     tagList("1Point3Acres Real Time County Updates URL:", pointacres)
   })
+  output$onep3 <- renderUI({
+    tagList("See the more extensive Susceptible-Infected-Recovered model 1Point3Acres:", pointacres)
+  })
   
-  epilist <- a("https://go.wisc.edu/a1832f", 
+  # U Penn Medicine
+  pennmed <- a("penn-chime.phl.io/", 
+                  href="http://penn-chime.phl.io/")
+  output$pennmed <- renderUI({
+    tagList("U Penn Medicine CHIME URL:", pennmed)
+  })
+  
+  # Yandell files
+  epilist <- a("go.wisc.edu/a1832f", 
               href="https://go.wisc.edu/a1832f")
   output$epilist <- renderUI({
     tagList("Epidemiology Models & Data for Coronavirus:", epilist)
   })
-  dslist <- a("https://datascience.wisc.edu/covid19", 
+  dslist <- a("datascience.wisc.edu/covid19", 
                  href="https://datascience.wisc.edu/covid19")
   output$dslist <- renderUI({
     tagList("COVID-19 Data Science Links:", dslist)
