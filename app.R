@@ -120,7 +120,7 @@ ui <- fluidPage(
             condition = 'input.states == "Countries"',
             selectInput("country", "Countries:", 
                         regions,
-                        c("US", "China", "Iran", "Italy", "Korea, South"),
+                        c("US", "Iran", "Italy", "Korea, South"),
                         multiple = TRUE)
           ),
           conditionalPanel(
@@ -360,15 +360,19 @@ server <- function(input, output) {
     # Get last date.
     if(input$states == "States") {
       cases_reactive() %>% 
-        filter(Date == max(Date)) %>%
+        group_by(Type, State) %>%
+        summarize(Count = max(Count)) %>%
+        ungroup %>%
         arrange(State) %>%
-        select(Type, Region, State, Count) %>%
+        select(Type, State, Count) %>%
         mutate(Count = as.integer(Count)) %>%
         pivot_wider(names_from = Type, values_from = Count) %>%
         mutate(Doubling = doubling)
     } else {
       cases_reactive() %>% 
-        filter(Date == max(Date)) %>%
+        group_by(Type, Region) %>%
+        summarize(Count = max(Count)) %>%
+        ungroup %>%
         arrange(Region) %>%
         select(Type, Region, Count) %>%
         mutate(Count = as.integer(Count)) %>%
