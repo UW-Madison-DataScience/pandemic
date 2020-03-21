@@ -222,8 +222,8 @@ server <- function(input, output) {
     tagList("Article URL:", url)
   })
 
-  sourceurl <- a("https://github.com/byandell/pandemic", 
-           href="https://github.com/byandell/pandemic")
+  sourceurl <- a("github.com/UW-Madison-DataScience/pandemic", 
+           href="https://github.com/UW-Madison-DataScience/pandemic")
   output$sourceurl <- renderUI({
     tagList("Source URL:", sourceurl)
   })
