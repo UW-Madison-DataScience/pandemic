@@ -170,6 +170,7 @@ ui <- fluidPage(
                mainPanel(
                  plotOutput(outputId = "main_plot"),
                  uiOutput("simpenn"),
+                 uiOutput("simharv"),
                  textOutput("space5"),
                  textOutput(outputId = "extra_text")
                )
@@ -178,24 +179,29 @@ ui <- fluidPage(
     tabPanel("References",
       textOutput("summary"),
       
-      textOutput("space"),
-      textOutput("summary1"),
-      textOutput("main_text"),
-      uiOutput("url"),
-      
+      # Real Cases
       textOutput("space1"),
       textOutput("summary2"),
       textOutput("jhudata"),
       uiOutput("jhusource"),
       
+      # Testing
       textOutput("space2"),
       textOutput("summary3"),
       uiOutput("testsource"),
       textOutput("summary4"),
+  
+      # Simulations    
+      textOutput("space"),
+      textOutput("summary1"),
+      textOutput("main_text"),
+      uiOutput("url"),
+      uiOutput("pennmed"),
+      uiOutput("harvard"),
+      textOutput("agents"),
       
       textOutput("space3"),
       uiOutput("pointacres"),
-      uiOutput("pennmed"),
       
       textOutput("space4"),
       uiOutput("sourceurl"),
@@ -444,11 +450,22 @@ server <- function(input, output) {
   pennmed <- a("penn-chime.phl.io/", 
                   href="http://penn-chime.phl.io/")
   output$pennmed <- renderUI({
-    tagList("U Penn Medicine CHIME URL:", pennmed)
+    tagList("See", pennmed, "for better Susceptible-Infected-Recovered (SIR) CHIME simulations from U Penn Medicine.")
   })
   output$simpenn <- renderUI({
-    tagList("See", pennmed, "for better Susceptible-Infected-Recovered CHIME simulations.")
+    tagList("See", pennmed, "for better Susceptible-Infected-Recovered (SIR) CHIME simulations.")
   })
+  
+  # Harvard U
+  harvard <- a("alhill.shinyapps.io/COVID19seir/", 
+               href="https://alhill.shinyapps.io/COVID19seir/")
+  output$harvard <- renderUI({
+    tagList("See", harvard, "for even better SEIR Hill simulations from Harvard U Hill group.")
+  })
+  output$simharv <- renderUI({
+    tagList("See", harvard, "for even better SEIR Hill simulations.")
+  })
+  output$agents <- renderText("Gold standard agent-based models are being developed in many places.")
   
   # Yandell files
   epilist <- a("go.wisc.edu/a1832f", 
