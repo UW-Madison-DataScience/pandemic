@@ -1,0 +1,43 @@
+http://penn-chime.phl.io/
+
+The model consists of individuals who are either Susceptible (S), Infected (I),
+or Recovered (R).
+The epidemic proceeds via a growth and decline process.
+This is the core model of infectious disease spread
+and has been in use in epidemiology for many years.
+The dynamics are given by the following 3 equations.
+
+S[t+1] <- S[t] * (1 - beta * I[t])
+I[t+1] <- I[t] * (1 - gamma + beta * S[t])
+R[t+1] <- R[t] + gamma * I[t]
+
+To project the expected impact to Penn Medicine, we estimate the terms of the model.
+To do this, we use a combination of estimates from other locations,
+informed estimates based on logical reasoning,
+and best guesses from the American Hospital Association.
+
+beta = tau * c = effective contact rate
+tau = transmissibility = virulence of pathogen
+c = average number of people exposed, which can be changed by social distancing
+gamma = inverse of mean recovery time in days = 1/14
+R0 = basic reproduction number = average number of people infected by an infected person
+R0 = beta / gamma
+g = beta * S - gamma = early phase growth
+S0 = initial population size
+R0 = 0 = initial recovered
+I0 = 1 = initial infected
+
+
+gamma <- 1 / 14
+double <- 8.5 # time to doubling
+growth = 2 ^ (1 / double) - 1
+S0 <- 1000000
+beta <- (growth + gamma) / S0
+
+
+
+
+
+
+
+
