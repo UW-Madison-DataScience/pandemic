@@ -1,0 +1,36 @@
+---
+title: "Deploy"
+author: "Sean Kent"
+date: "3/23/2020"
+output: html_document
+---
+
+## Instructions
+
+'Knit' this file to reload the data from Corona Data Scraper and deploy the app.  Alternatively, one can run all chunks.
+
+### Step 1: Re-download county level data file
+
+```{r}
+# Re-download the file from Corona Data Scraper to prevent download on each Shiny session (time consuming)
+download.file("https://coronadatascraper.com/timeseries-tidy.csv",
+              destfile = "data/timeseries-tidy.csv")
+
+```
+
+### Step 2: Deploy the app
+
+```{r}
+library(rsconnect)
+
+# TODO: need to set this up manually.  Look under Tokens from the Profile section
+rsconnect::setAccountInfo(
+  name="<ACCOUNT>",
+  token="<TOKEN>",
+  secret="<SECRET>"
+)
+
+deployApp()
+```
+ 
+ 

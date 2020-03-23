@@ -4,6 +4,7 @@ library(dplyr)
 library(tidyr)
 library(stringr)
 library(readr)
+library(ggrepel)
 
 double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
                          bedmax) {
@@ -50,6 +51,43 @@ real_cases_county <- function() {
     weight_date()
 }
 
+real_cases_cds <- function() {
+  # data downloaded from "https://coronadatascraper.com/timeseries-tidy.csv"
+  # takes too long in the shiny app to download the data each time (34 seconds).  Need to 
+  #  manually update the file in the application for this one to work
+  dirpath <- "data/timeseries-tidy.csv"
+  # dirpath <- "pandemic/data/timeseries-tidy.csv"
+  
+  read.csv(dirpath) %>%
+    filter(city == "") %>% # remove any city level data
+    filter(type %in% c("cases", "deaths", "recovered")) %>% # also have active, growthFactor for some
+    select(type, county, state, country, date, value, population) %>% 
+    mutate_at(vars(type, county, state, country), as.character) %>% 
+    mutate(date = as.POSIXct(as.character(date), format="%Y-%m-%d")) %>% 
+    mutate(county = paste0(county, ", ", state)) %>% 
+    rename(
+      Type = type,
+      County = county,
+      State = state,
+      Region = country,
+      Date = date,
+      Count = value
+    ) %>% 
+    mutate(Type = case_when(
+      Type == "cases" ~ "Confirmed",
+      Type == "deaths" ~ "Death",
+      Type == "recovered" ~ "Recovered",
+      TRUE ~ NA_character_
+    )) %>%
+    as_tibble() %>% 
+    weight_date()
+}
+
+real_cases_county_cds <- function(cases_cds) {
+  cases_cds %>% 
+    filter(County != "" & Region == "USA")
+}
+
 weight_date <- function(cases_state) {
   # Add weights skewed toward most recent dates.
   skew <- 20
@@ -83,8 +121,10 @@ real_cases <- function(cases_state) {
 
 cases_county <- real_cases_county()
 cases_state <- real_cases_state(cases_county)
-cases_county <- cases_county %>%
-  filter(State == "WI")
+# cases_county <- cases_county %>%
+#   filter(State == "WI")
+cases_cds <- real_cases_cds()
+cases_county <- real_cases_county_cds(cases_cds)
 counties <- sort(unique(cases_county$County))
 cases <- real_cases(cases_state)
 regions <- sort(unique(cases$Region))
@@ -116,6 +156,8 @@ ui <- fluidPage(
     tabPanel("Real Cases",
       sidebarLayout(
         sidebarPanel(
+          h4("Select data to view from the options below."),
+          radioButtons("states", "Level:", c("Counties", "States","Countries"), inline = TRUE, selected = "States"),
           conditionalPanel(
             condition = 'input.states == "Countries"',
             selectInput("country", "Countries:", 
@@ -130,14 +172,21 @@ ui <- fluidPage(
                         c("WI","MI","IL","IA"),
                         multiple = TRUE)
           ),
-          radioButtons("states", "", c("States","Countries"), inline = TRUE),
-          selectInput("casetypes", "Cases:", c("Confirmed","Death","Recovered")),
+          conditionalPanel(
+            condition = 'input.states == "Counties"',
+            selectInput("county", "Counties:", 
+                        counties,
+                        c("Dane County, WI","Milwaukee County, WI", "Waukesha County, WI", "Fond du Lac County, WI"),
+                        multiple = TRUE)
+          ),
+          selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric")),
-          checkboxInput("predict", "Add predict lines?", FALSE)
+          checkboxInput("predict", "Add predict lines?", FALSE),
+          hr(),
+          textOutput("latest")
         ),
         mainPanel(
           plotOutput(outputId = "case_plot"),
-          textOutput("latest"),
           tableOutput("fitcase"),
           uiOutput("onep3"))
       )
@@ -184,6 +233,7 @@ ui <- fluidPage(
       textOutput("summary2"),
       textOutput("jhudata"),
       uiOutput("jhusource"),
+      uiOutput("cdsdata"),
       
       # Testing
       textOutput("space2"),
@@ -268,18 +318,30 @@ server <- function(input, output) {
                   filter(Count > 0, Type == input$casetypes))
     p <- p +
       aes(Date, Count) +
-      geom_line(size = 2) +
+      geom_line(size = 1.5) +
       ggtitle(paste(input$casetypes, "cases"))
     
-    
+    latest_date <- max(cases_reactive()$Date)
     if(length(units_reactive()) > 1) {
       if(input$states == "States") {
         p <- p +
-          aes(col = State, z = State)
-        
-      } else {
+          aes(col = State, z = State) +
+          ggrepel::geom_label_repel(aes(label = State), color = "black",
+                                    data = . %>% filter(Date == latest_date)) +
+          theme(legend.position = "none")
+      } else if (input$states == "Countries") {
         p <- p +
-          aes(col = Region, z = Region)
+          aes(col = Region, z = Region) +
+          ggrepel::geom_label_repel(aes(label = Region), color = "black",
+                                    data = . %>% filter(Date == latest_date)) +
+          theme(legend.position = "none")
+      } else {
+        p <- p + 
+          aes(col = County, z = County) + 
+          ggrepel::geom_label_repel(aes(label = County), color = "black",
+                                    data = . %>% filter(Date == latest_date)) +
+          theme(legend.position = "none")
+        
       }
     } else {
       p <- p +
@@ -311,16 +373,23 @@ server <- function(input, output) {
   units_reactive <- reactive({
     switch(
       req(input$states),
+      Counties = {
+        sort(req(input$county))
+      },
       States = {
         sort(req(input$state))
       },
       Countries = {
         sort(req(input$country))
       })
-  })
+  }) 
   cases_reactive <- reactive({
     switch(
       req(input$states),
+      Counties = {
+        cases_county %>% 
+          filter(County %in% units_reactive())
+      },
       States = {
         cases_state %>% 
           filter(Region == "US", 
@@ -332,7 +401,7 @@ server <- function(input, output) {
       })
   })
   
-  output$latest <- renderText({as.character(max(cases_reactive()$Date))})
+  output$latest <- renderText({paste0("Data is current as of ", as.character(max(cases_reactive()$Date)))})
   # Fit line for real cases.
   output$fitcase <- renderTable({
     req(input$states, input$casetypes)
@@ -341,6 +410,9 @@ server <- function(input, output) {
     if(length(units_reactive() > 1)) {
       switch(
         req(input$states),
+        Counties = {
+          form <- formula(Count ~ Date * County)
+        },
         States = {
           form <- formula(Count ~ Date * State)
         },
@@ -374,7 +446,7 @@ server <- function(input, output) {
         mutate(Count = as.integer(Count)) %>%
         pivot_wider(names_from = Type, values_from = Count) %>%
         mutate(Doubling = doubling)
-    } else {
+    } else if (input$states == "Countries") {
       cases_reactive() %>% 
         group_by(Type, Region) %>%
         summarize(Count = max(Count)) %>%
@@ -383,6 +455,16 @@ server <- function(input, output) {
         select(Type, Region, Count) %>%
         mutate(Count = as.integer(Count)) %>%
         pivot_wider(names_from = Type, values_from = Count) %>%
+        mutate(Doubling = doubling)
+    } else {
+      cases_reactive() %>% 
+        # filter(Type == input$casetypes)
+        group_by(Type, County) %>% 
+        summarize(Count = max(Count)) %>% 
+        ungroup %>% 
+        arrange(County) %>% 
+        mutate(Count = as.integer(Count)) %>% 
+        pivot_wider(names_from = Type, values_from = Count) %>% 
         mutate(Doubling = doubling)
     }
   })
@@ -418,12 +500,16 @@ server <- function(input, output) {
   output$space4 <- renderText("---")
   output$space5 <- renderText("---")
   output$jhudata <- renderText(
-    "Real cases come from Johns Hopkins U Center for Systems Science and Engineering."
+    "Real cases (State and Country level) come from Johns Hopkins U Center for Systems Science and Engineering."
   )
   sourcejhu <- a("github.com/CSSEGISandData/COVID-19", 
                  href="https://github.com/CSSEGISandData/COVID-19")
   output$jhusource <- renderUI({
     tagList("JHU CSSE Data URL:", sourcejhu)
+  })
+  sourcecds <- a("https://coronadatascraper.com/", href = "https://coronadatascraper.com/#home")
+  output$cdsdata <- renderUI({
+    tagList("Real cases (County level) come from Corona Data Scraper:", sourcecds)
   })
   output$testinfo <- renderText(
     "Test data compiled by COVID Testing Project."
@@ -443,7 +529,7 @@ server <- function(input, output) {
     tagList("1Point3Acres Real Time County Updates URL:", pointacres)
   })
   output$onep3 <- renderUI({
-    tagList("See", pointacres, "for county updates.")
+    tagList("See", pointacres, "for additional county updates.")
   })
   
   # U Penn Medicine
