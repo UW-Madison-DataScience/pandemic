@@ -56,8 +56,9 @@ real_cases_cds <- function() {
   # takes too long in the shiny app to download the data each time (34 seconds).  Need to 
   #  manually update the file in the application for this one to work
   dirpath <- "data/timeseries-tidy.csv"
-  # dirpath <- "pandemic/data/timeseries-tidy.csv"
-  
+  if(!file.exists(dirpath)) {
+    dirpath <- "https://coronadatascraper.com/timeseries-tidy.csv"
+  }
   read.csv(dirpath) %>%
     filter(city == "") %>% # remove any city level data
     filter(type %in% c("cases", "deaths", "recovered")) %>% # also have active, growthFactor for some
