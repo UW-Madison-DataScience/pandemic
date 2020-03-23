@@ -30,7 +30,7 @@ rsconnect::setAccountInfo(
   secret="<SECRET>"
 )
 
-deployApp()
+deployApp(appFiles = "app.R")
 ```
  
  
