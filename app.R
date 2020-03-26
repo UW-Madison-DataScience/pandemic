@@ -506,7 +506,7 @@ server <- function(input, output) {
   output$space4 <- renderText("---")
   output$space5 <- renderText("---")
   output$jhudata <- renderText(
-    "Real cases (State and Country level) come from Johns Hopkins U Center for Systems Science and Engineering."
+    "Real cases (Country level) come from Johns Hopkins U Center for Systems Science and Engineering."
   )
   sourcejhu <- a("github.com/CSSEGISandData/COVID-19", 
                  href="https://github.com/CSSEGISandData/COVID-19")
@@ -582,11 +582,10 @@ server <- function(input, output) {
     Does our community have enough hospital beds?'})
   output$summary2 <- renderText({
     '"Real Cases" tab draws on Johns Hopkins U CSSE, which many apps are using.
-    What I added beyond the interactive visuals is an estimate of the exponential rate
-    for confirmed cases
-    (dashed lines if you click the “Add predict lines?” box),
-    putting heavier weight on the most recent days to reflect changing habits and patterns.
-    Note the counts on most recent day and the estimating doubling time in days.'})
+    Doubling time (days) is estimated via Poisson regression with exponential weights
+    (heavier weight on recent dates)
+    using ONLY confirmed cases.
+    Dashed Poisson regression lines added if you click the “Add predict lines?” box.'})
   output$summary3 <- renderText({
     '"Testing" tab reflects new data from COVID Testing Project.'})
   output$summary4 <- renderText({
