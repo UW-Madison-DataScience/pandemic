@@ -22,17 +22,19 @@ double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
 }
 
 real_cases_county <- function() {
+  # These data were modified 3/22 to only have one line per region and changed names.
+  # Province/State is no longer meaningful for USA.
   dirpath <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series"
 
   bind_rows(
     Confirmed = read_csv(
-      file.path(dirpath, "time_series_19-covid-Confirmed.csv"),
+      file.path(dirpath, "time_series_covid19_confirmed_global.csv"),
       col_types = cols()),
     Death = read_csv(
-      file.path(dirpath, "time_series_19-covid-Deaths.csv"),
+      file.path(dirpath, "time_series_covid19_deaths_global.csv"),
       col_types = cols()),
     Recovered = read_csv(
-      file.path(dirpath, "time_series_19-covid-Recovered.csv"),
+      file.path(dirpath, "time_series_covid19_recovered_global.csv"),
       col_types = cols()),
     .id = "Type") %>%
     rename(State = "Province/State",
@@ -44,9 +46,10 @@ real_cases_county <- function() {
            State = ifelse(str_detect(State, ","), str_remove(State, "^.*, "), State),
            State = ifelse(State %in% state.name, 
                           state.abb[match(State, state.name)], 
-                          State)) %>%
+                          State),
+           Region = ifelse(Region == "US", "USA", Region)) %>%
     group_by(Type, County, State, Region, Date) %>%
-    summarize(Count = sum(Count)) %>%
+    summarize(Count = sum(Count, na.rm = TRUE)) %>%
     ungroup %>%
     weight_date()
 }
@@ -108,7 +111,7 @@ real_cases_state <- function(cases_state) {
   # Sum within Regions
   cases_state %>%
     group_by(Type, Region, State, Date, Weight) %>%
-    summarize(Count = sum(Count)) %>%
+    summarize(Count = sum(Count, na.rm = TRUE)) %>%
     ungroup
 }
 
@@ -116,23 +119,24 @@ real_cases <- function(cases_state) {
   # Sum within Regions
   cases_state %>%
     group_by(Type, Region, Date, Weight) %>%
-    summarize(Count = sum(Count)) %>%
+    summarize(Count = sum(Count, na.rm = TRUE)) %>%
     ungroup
 }
 
+# JHU Data
 cases_county <- real_cases_county()
 cases_state <- real_cases_state(cases_county)
-# cases_county <- cases_county %>%
-#   filter(State == "WI")
-cases_cds <- real_cases_cds()
-cases_county <- real_cases_county_cds(cases_cds)
-counties <- sort(unique(cases_county$County))
 cases <- real_cases(cases_state)
-regions <- sort(unique(cases$Region))
-cases_state <- cases_state %>%
-  filter(Region == "US")
 
-# Testing in US
+# Coronadatascraper Data
+cases_state <- real_cases_cds()
+cases_county <- real_cases_county_cds(cases_state)
+counties <- sort(unique(cases_county$County))
+regions <- sort(unique(cases$Region))
+cases_state <- real_cases_state(cases_state) %>%
+  filter(Region == "USA")
+
+# Testing in USA
 test_us <- read_csv("https://covidtracking.com/api/us/daily.csv",
                     col_types = cols()) %>%
   mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
@@ -163,7 +167,7 @@ ui <- fluidPage(
             condition = 'input.states == "Countries"',
             selectInput("country", "Countries:", 
                         regions,
-                        c("US", "Iran", "Italy", "Korea, South"),
+                        c("USA", "Iran", "Italy", "Korea, South"),
                         multiple = TRUE)
           ),
           conditionalPanel(
@@ -194,7 +198,7 @@ ui <- fluidPage(
     ),
     tabPanel("Testing",
       plotOutput("testplot"),
-      radioButtons("testgroup", "", c("States","US"), inline = TRUE),
+      radioButtons("testgroup", "", c("States","USA"), inline = TRUE),
       conditionalPanel(
         condition = 'input.testgroup == "States"',
         selectInput("teststate", "States:", 
@@ -393,7 +397,7 @@ server <- function(input, output) {
       },
       States = {
         cases_state %>% 
-          filter(Region == "US", 
+          filter(Region == "USA", 
                  State %in% units_reactive())
       },
       Countries = {
@@ -402,7 +406,8 @@ server <- function(input, output) {
       })
   })
   
-  output$latest <- renderText({paste0("Data is current as of ", as.character(max(cases_reactive()$Date)))})
+  output$latest <- renderText({paste0("Data is current as of ",
+                                      as.character(max(cases_reactive()$Date)))})
   # Fit line for real cases.
   output$fitcase <- renderTable({
     req(input$states, input$casetypes)
@@ -440,7 +445,7 @@ server <- function(input, output) {
     if(input$states == "States") {
       cases_reactive() %>% 
         group_by(Type, State) %>%
-        summarize(Count = max(Count)) %>%
+        summarize(Count = max(Count, na.rm = TRUE)) %>%
         ungroup %>%
         arrange(State) %>%
         select(Type, State, Count) %>%
@@ -450,7 +455,7 @@ server <- function(input, output) {
     } else if (input$states == "Countries") {
       cases_reactive() %>% 
         group_by(Type, Region) %>%
-        summarize(Count = max(Count)) %>%
+        summarize(Count = max(Count, na.rm = TRUE)) %>%
         ungroup %>%
         arrange(Region) %>%
         select(Type, Region, Count) %>%
@@ -461,7 +466,7 @@ server <- function(input, output) {
       cases_reactive() %>% 
         # filter(Type == input$casetypes)
         group_by(Type, County) %>% 
-        summarize(Count = max(Count)) %>% 
+        summarize(Count = max(Count, na.rm = TRUE)) %>% 
         ungroup %>% 
         arrange(County) %>% 
         mutate(Count = as.integer(Count)) %>% 
@@ -481,7 +486,7 @@ server <- function(input, output) {
             aes(date, count, col = state) +
             facet_wrap(~ status, scales = "free_y")
         },
-        US = {
+        USA = {
           p <- ggplot(test_us) +
             aes(date, count, col = status)
         })
