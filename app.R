@@ -515,7 +515,7 @@ server <- function(input, output) {
   })
   sourcecds <- a("https://coronadatascraper.com/", href = "https://coronadatascraper.com/#home")
   output$cdsdata <- renderUI({
-    tagList("Real cases (County level) come from Corona Data Scraper:", sourcecds)
+    tagList("Real cases (State and County level) come from Corona Data Scraper:", sourcecds)
   })
   output$testinfo <- renderText(
     "Test data compiled by COVID Testing Project."
