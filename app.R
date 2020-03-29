@@ -411,20 +411,25 @@ server <- function(input, output) {
   # Fit line for real cases.
   output$fitcase <- renderTable({
     req(input$states, input$casetypes)
-    
+
     # Get estimate doubling rate
     if(length(units_reactive() > 1)) {
-      switch(
-        req(input$states),
-        Counties = {
-          form <- formula(Count ~ Date * County)
-        },
-        States = {
-          form <- formula(Count ~ Date * State)
-        },
-        Countries = {
-          form <- formula(Count ~ Date * Region)
-        })
+      req(units_reactive())
+      if(length(units_reactive()) == 1) {
+        form <- formula(Count ~ Date)
+      } else {
+        switch(
+          req(input$states),
+          Counties = {
+            form <- formula(Count ~ Date * County)
+          },
+          States = {
+            form <- formula(Count ~ Date * State)
+          },
+          Countries = {
+            form <- formula(Count ~ Date * Region)
+          })
+      }
       fit <- glm(form, cases_reactive(),
           weight = Weight, family = "poisson")
       coefs <- coef(fit)
@@ -439,10 +444,12 @@ server <- function(input, output) {
       coefs <- coefs[str_detect(names(coefs), "Date")]
       names(coefs) <- units_reactive()
     }
-    doubling <- log(2) / coefs / 86400
+    # Rate cannot be negative, but could be really small.
+    doubling <- log(2) / pmax(0, coefs) / 86400
     
     # Get last date.
-    if(input$states == "States") {
+    switch(input$states,
+    States = {
       cases_reactive() %>% 
         group_by(Type, State) %>%
         summarize(Count = max(Count, na.rm = TRUE)) %>%
@@ -451,8 +458,8 @@ server <- function(input, output) {
         select(Type, State, Count) %>%
         mutate(Count = as.integer(Count)) %>%
         pivot_wider(names_from = Type, values_from = Count) %>%
-        mutate(Doubling = doubling)
-    } else if (input$states == "Countries") {
+        mutate(Doubling = doubling)},
+    Countries = {
       cases_reactive() %>% 
         group_by(Type, Region) %>%
         summarize(Count = max(Count, na.rm = TRUE)) %>%
@@ -461,8 +468,8 @@ server <- function(input, output) {
         select(Type, Region, Count) %>%
         mutate(Count = as.integer(Count)) %>%
         pivot_wider(names_from = Type, values_from = Count) %>%
-        mutate(Doubling = doubling)
-    } else {
+        mutate(Doubling = doubling)},
+    Counties = {
       cases_reactive() %>% 
         # filter(Type == input$casetypes)
         group_by(Type, County) %>% 
@@ -472,7 +479,7 @@ server <- function(input, output) {
         mutate(Count = as.integer(Count)) %>% 
         pivot_wider(names_from = Type, values_from = Count) %>% 
         mutate(Doubling = doubling)
-    }
+    })
   })
   
   output$testplot <- renderPlot({

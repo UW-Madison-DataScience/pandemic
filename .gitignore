@@ -8,3 +8,4 @@
 R/
 *.Rproj
 rsconnect/
+*.csv
