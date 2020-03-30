@@ -123,18 +123,23 @@ real_cases <- function(cases_state) {
     ungroup
 }
 
-# JHU Data
+# JHU Data. Only has State for a few countries.
 cases_county <- real_cases_county()
 cases_state <- real_cases_state(cases_county)
 cases <- real_cases(cases_state)
 
-# Coronadatascraper Data
-cases_state <- real_cases_cds()
-cases_county <- real_cases_county_cds(cases_state)
+# Coronadatascraper Data. Using this for State and County
+cases_state <- real_cases_cds() %>%
+  filter(State != "")
+cases_county <- real_cases_county_cds(cases_state) %>%
+  filter(!str_detect(County, "^,"),
+         !str_detect(County, "unassign")) 
 counties <- sort(unique(cases_county$County))
 regions <- sort(unique(cases$Region))
-cases_state <- real_cases_state(cases_state) %>%
-  filter(Region == "USA")
+# For now, only look at USA. Open up once figure out how to do counties.
+cases_state <- real_cases_state(cases_state)# %>%
+#  filter(Region == "USA")
+regions_cds <- sort(unique(cases_state$Region))
 
 # Testing in USA
 test_us <- read_csv("https://covidtracking.com/api/us/daily.csv",
@@ -162,7 +167,7 @@ ui <- fluidPage(
       sidebarLayout(
         sidebarPanel(
           h4("Select data to view from the options below."),
-          radioButtons("states", "Level:", c("Counties", "States","Countries"), inline = TRUE, selected = "States"),
+          radioButtons("states", "", c("Counties", "States","Countries"), inline = TRUE, selected = "States"),
           conditionalPanel(
             condition = 'input.states == "Countries"',
             selectInput("country", "Countries:", 
@@ -171,18 +176,18 @@ ui <- fluidPage(
                         multiple = TRUE)
           ),
           conditionalPanel(
-            condition = 'input.states == "States"',
-            selectInput("state", "States:", 
-                        state.abb,
-                        c("WI","MI","IL","IA"),
-                        multiple = TRUE)
+            condition = 'input.states != "Countries"',
+            tagList(
+              selectInput("country_cds", "Countries:", 
+                          regions_cds,
+                          c("USA"),
+                          multiple = TRUE),
+              uiOutput("states_region")
+            )
           ),
           conditionalPanel(
             condition = 'input.states == "Counties"',
-            selectInput("county", "Counties:", 
-                        counties,
-                        c("Dane County, WI","Milwaukee County, WI", "Waukesha County, WI", "Fond du Lac County, WI"),
-                        multiple = TRUE)
+            uiOutput("counties_states")
           ),
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric")),
@@ -201,7 +206,7 @@ ui <- fluidPage(
       radioButtons("testgroup", "", c("States","USA"), inline = TRUE),
       conditionalPanel(
         condition = 'input.testgroup == "States"',
-        selectInput("teststate", "States:", 
+        selectInput("teststate", "State:", 
                     state.abb,
                     c("WI","MI","IL","IA"),
                     multiple = TRUE)
@@ -397,13 +402,42 @@ server <- function(input, output) {
       },
       States = {
         cases_state %>% 
-          filter(Region == "USA", 
+          filter(Region %in% input$country_cds, 
                  State %in% units_reactive())
       },
       Countries = {
         cases %>% 
           filter(Region %in% units_reactive())
       })
+  })
+  
+  # States in a Region
+  output$states_region <- renderUI({
+    req(input$country_cds)
+    states_region <- 
+      sort(
+        unique((
+          cases_state %>% 
+            filter(Region %in% input$country_cds))$State))
+    
+    selectInput("state", "States:", 
+                states_region,
+                c("WI","MI","IL","IA"),
+                multiple = TRUE)
+  })
+  # Counties in a State
+  output$counties_states <- renderUI({
+    req(input$state, input$country_cds)
+    counties_states <- 
+      sort(
+        unique((
+          cases_county %>% 
+            filter(Region %in% input$country_cds,
+                   State %in% input$state))$County))
+    selectInput("county", "Counties:", 
+                counties_states,
+                c("Dane County, WI","Milwaukee County, WI", "Waukesha County, WI", "Fond du Lac County, WI"),
+                multiple = TRUE)
   })
   
   output$latest <- renderText({paste0("Data is current as of ",
