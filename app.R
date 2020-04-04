@@ -83,13 +83,27 @@ real_cases_cds <- function() {
       Type == "recovered" ~ "Recovered",
       TRUE ~ NA_character_
     )) %>%
-    as_tibble() %>% 
+    as_tibble() %>%
+    filter(State != "") %>%
+    mutate(Region = ifelse(Region == "United States", "USA", Region),
+           Region = ifelse(Region == "iso1:US", "USA", Region),
+           State = str_remove(State, "^iso2:US-"),
+           State = ifelse(State %in% state.name, 
+                          state.abb[match(State, state.name)], 
+                          State)) %>% 
     weight_date()
 }
 
 real_cases_county_cds <- function(cases_cds) {
   cases_cds %>% 
-    filter(County != "" & Region == "USA")
+    filter(County != "" & Region == "USA") %>%
+    filter(!str_detect(County, "^,"),
+           !str_detect(County, "unassign")) %>%
+    mutate(County = ifelse(State %in% state.abb, 
+                           str_replace(County, 
+                                       state.name[match(State, state.abb)],
+                                       state.abb[match(State, state.abb)]), 
+                           County))
 }
 
 weight_date <- function(cases_state) {
@@ -129,27 +143,25 @@ cases_state <- real_cases_state(cases_county)
 cases <- real_cases(cases_state)
 
 # Coronadatascraper Data. Using this for State and County
-cases_state <- real_cases_cds() %>%
-  filter(State != "")
-cases_county <- real_cases_county_cds(cases_state) %>%
-  filter(!str_detect(County, "^,"),
-         !str_detect(County, "unassign")) 
+cases_state <- real_cases_cds()
+cases_county <- real_cases_county_cds(cases_state) 
 counties <- sort(unique(cases_county$County))
 regions <- sort(unique(cases$Region))
 # For now, only look at USA. Open up once figure out how to do counties.
-cases_state <- real_cases_state(cases_state)# %>%
-#  filter(Region == "USA")
+cases_state <- real_cases_state(cases_state)
 regions_cds <- sort(unique(cases_state$Region))
 
 # Testing in USA
 test_us <- read_csv("https://covidtracking.com/api/us/daily.csv",
                     col_types = cols()) %>%
   mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
+  select(date, positive:pending, recovered, death, hospitalized, total) %>%
   pivot_longer(positive:total, names_to = "status", values_to = "count") %>%
   filter(status != "death")
 test_st <- read_csv("http://covidtracking.com/api/states/daily.csv",
                     col_types = cols()) %>%
   mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
+  select(date, state, positive:pending, recovered, death, hospitalized, total) %>%
   pivot_longer(positive:total, names_to = "status", values_to = "count") %>%
   filter(status != "death")
 
