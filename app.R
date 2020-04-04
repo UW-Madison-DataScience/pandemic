@@ -1,10 +1,12 @@
-library(shiny)
-library(ggplot2)
-library(dplyr)
-library(tidyr)
-library(stringr)
-library(readr)
-library(ggrepel)
+suppressMessages({
+  library(shiny)
+  library(ggplot2)
+  library(dplyr)
+  library(tidyr)
+  library(stringr)
+  library(readr)
+  library(ggrepel)
+})
 
 double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
                          bedmax) {
@@ -152,18 +154,22 @@ cases_state <- real_cases_state(cases_state)
 regions_cds <- sort(unique(cases_state$Region))
 
 # Testing in USA
-test_us <- read_csv("https://covidtracking.com/api/us/daily.csv",
-                    col_types = cols()) %>%
-  mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
-  select(date, positive:pending, recovered, death, hospitalized, total) %>%
-  pivot_longer(positive:total, names_to = "status", values_to = "count") %>%
-  filter(status != "death")
-test_st <- read_csv("http://covidtracking.com/api/states/daily.csv",
-                    col_types = cols()) %>%
-  mutate(date = as.Date(as.character(date), "%Y%m%d")) %>%
-  select(date, state, positive:pending, recovered, death, hospitalized, total) %>%
-  pivot_longer(positive:total, names_to = "status", values_to = "count") %>%
-  filter(status != "death")
+read_testing <- function(filename, by_state = FALSE) {
+  out <- read_csv(filename, col_types = cols()) %>%
+    mutate(date = as.Date(as.character(date), "%Y%m%d"))
+  if(by_state) {
+    out <- out %>%
+      select(date, state, positive:pending, recovered, death, hospitalized, total)
+  } else {
+    out <- out %>%
+      select(date, positive:pending, recovered, death, hospitalized, total)
+  }
+  out %>%
+    pivot_longer(positive:total, names_to = "status", values_to = "count") %>%
+    filter(status != "death")
+}
+test_us <- read_testing("https://covidtracking.com/api/us/daily.csv")
+test_st <- read_testing("http://covidtracking.com/api/states/daily.csv", TRUE)
 
 ##########################################################################33
 
@@ -202,7 +208,7 @@ ui <- fluidPage(
             uiOutput("counties_states")
           ),
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
-          selectInput("realscale", "Plot Scale:", c("raw","geometric")),
+          selectInput("realscale", "Plot Scale:", c("raw","geometric","new_cases")),
           checkboxInput("predict", "Add predict lines?", FALSE),
           hr(),
           textOutput("latest")
@@ -336,35 +342,61 @@ server <- function(input, output) {
   # Plot real cases.
   output$case_plot <- renderPlot({
     req(input$states, input$casetypes)
-    p <- ggplot(cases_reactive() %>% 
-                  filter(Count > 0, Type == input$casetypes))
-    p <- p +
+    dat <- cases_reactive() %>%
+      filter(Type == input$casetypes)
+    if(req(input$realscale) == "new_cases") {
+      switch(input$states,
+      States = {
+        dat <- dat %>% 
+          group_by(State) %>%
+            mutate(OCount = Count,
+                   Count = c(first(Count), diff(Count))) %>%
+          ungroup
+      },
+      Countries = {
+        dat <- dat %>% 
+          group_by(Region) %>%
+          mutate(Count = c(first(Count), diff(Count))) %>%
+          ungroup
+      },
+      Counties = {
+        dat <- dat %>% 
+          group_by(County) %>%
+          mutate(Count = c(first(Count), diff(Count))) %>%
+          ungroup
+      })
+    }
+    p <- ggplot(dat %>% mutate(Count = ifelse(Count <= 0, NA, Count)))
+    p <- suppressWarnings(p +
       aes(Date, Count) +
       geom_line(size = 1.5) +
-      ggtitle(paste(input$casetypes, "cases"))
+      ggtitle(paste(input$casetypes, "cases")))
     
-    latest_date <- max(cases_reactive()$Date)
+    latest_date <- max(dat$Date)
     if(length(units_reactive()) > 1) {
-      if(input$states == "States") {
+      switch(input$states,
+      States = {
         p <- p +
           aes(col = State, z = State) +
           ggrepel::geom_label_repel(aes(label = State), color = "black",
                                     data = . %>% filter(Date == latest_date)) +
           theme(legend.position = "none")
-      } else if (input$states == "Countries") {
+      },
+      Countries = {
         p <- p +
           aes(col = Region, z = Region) +
           ggrepel::geom_label_repel(aes(label = Region), color = "black",
                                     data = . %>% filter(Date == latest_date)) +
           theme(legend.position = "none")
-      } else {
+      },
+      Counties = {
         p <- p + 
           aes(col = County, z = County) + 
           ggrepel::geom_label_repel(aes(label = County), color = "black",
                                     data = . %>% filter(Date == latest_date)) +
           theme(legend.position = "none")
         
-      }
+      })
     } else {
       p <- p +
         theme(legend.position = "none")
@@ -372,17 +404,17 @@ server <- function(input, output) {
 
     if(isTruthy(input$predict)) {
       if(input$states == "States") {
-        p <- p + 
+        p <- suppressWarnings(p + 
           geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
                       formula = y ~ x,
                       method.args = list(family = "poisson"),
-                      linetype = "dashed")
+                      linetype = "dashed"))
       } else {
-        p <- p + 
+        p <- suppressWarnings(p + 
           geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
                       formula = y ~ x,
                       method.args = list(family = "poisson"),
-                      linetype = "dashed")
+                      linetype = "dashed"))
       }
     }
     if(input$realscale == "geometric") {
