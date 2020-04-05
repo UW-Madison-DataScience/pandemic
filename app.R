@@ -6,6 +6,7 @@ suppressMessages({
   library(stringr)
   library(readr)
   library(ggrepel)
+  library(RcppRoll)
 })
 
 double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
@@ -216,7 +217,11 @@ ui <- fluidPage(
         mainPanel(
           plotOutput(outputId = "case_plot"),
           tableOutput("fitcase"),
-          uiOutput("onep3"))
+          uiOutput("onep3"),
+          conditionalPanel(
+            condition = 'input.realscale == "new_cases"',
+            textOutput("newcases"))
+          )
       )
     ),
     tabPanel("Testing",
@@ -345,28 +350,33 @@ server <- function(input, output) {
     dat <- cases_reactive() %>%
       filter(Type == input$casetypes)
     if(req(input$realscale) == "new_cases") {
+      tmpfn <- function(Count) {
+        dc <- diff(Count)
+        c(first(Count), 
+          roll_mean(c(first(Count), dc), 3),
+          last(dc))
+      }
       switch(input$states,
       States = {
         dat <- dat %>% 
           group_by(State) %>%
-            mutate(OCount = Count,
-                   Count = c(first(Count), diff(Count))) %>%
+            mutate(Count = tmpfn(Count)) %>%
           ungroup
       },
       Countries = {
         dat <- dat %>% 
           group_by(Region) %>%
-          mutate(Count = c(first(Count), diff(Count))) %>%
+          mutate(Count = tmpfn(Count)) %>%
           ungroup
       },
       Counties = {
         dat <- dat %>% 
           group_by(County) %>%
-          mutate(Count = c(first(Count), diff(Count))) %>%
+          mutate(Count = tmpfn(Count)) %>%
           ungroup
       })
     }
-    p <- ggplot(dat %>% mutate(Count = ifelse(Count <= 0, NA, Count)))
+    p <- ggplot(dat %>% filter(Count >= 1))
     p <- suppressWarnings(p +
       aes(Date, Count) +
       geom_line(size = 1.5) +
@@ -622,6 +632,7 @@ server <- function(input, output) {
   output$onep3 <- renderUI({
     tagList("See", pointacres, "for additional county updates.")
   })
+  output$newcases <- renderText("New cases are 3-day averages.")
   
   # U Penn Medicine
   pennmed <- a("penn-chime.phl.io/", 
