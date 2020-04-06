@@ -212,6 +212,7 @@ ui <- fluidPage(
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric","new_cases")),
           checkboxInput("predict", "Add predict lines?", FALSE),
+          checkboxInput("showall", "Show all units?", FALSE),
           hr(),
           textOutput("latest")
         ),
@@ -348,8 +349,13 @@ server <- function(input, output) {
   # Plot real cases.
   output$case_plot <- renderPlot({
     req(input$states, input$casetypes)
-    dat <- cases_reactive() %>%
-      filter(Type == input$casetypes)
+    if(isTruthy(input$showall)) {
+      dat <- allcases_reactive() %>%
+        filter(Type == input$casetypes)       
+    } else {
+      dat <- cases_reactive() %>%
+        filter(Type == input$casetypes)
+    }
     if(req(input$realscale) == "new_cases") {
       tmpfn <- function(Count) {
         dc <- diff(Count)
@@ -377,7 +383,15 @@ server <- function(input, output) {
           ungroup
       })
     }
-    p <- ggplot(dat %>% filter(Count >= 1))
+    
+    # Color-blind friendly palette with grey:
+    cbPalette <- c("#DDDDDD", "#E69F00", "#56B4E9", "#009E73",
+                   "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+    if(!isTruthy(input$showall))
+      cbPalette <- cbPalette[-1]
+    p <- ggplot(dat %>% filter(Count >= 1)) +
+      scale_colour_manual(values=cbPalette)
+    
     p <- suppressWarnings(p +
       aes(Date, Count) +
       geom_line(size = 1.5) +
@@ -388,22 +402,22 @@ server <- function(input, output) {
       switch(input$states,
       States = {
         p <- p +
-          aes(col = State, z = State) +
-          ggrepel::geom_label_repel(aes(label = State), color = "black",
+          aes(col = colgp, z = State) +
+          ggrepel::geom_label_repel(aes(label = colgp), color = "black",
                                     data = . %>% filter(Date == latest_date)) +
           theme(legend.position = "none")
       },
       Countries = {
         p <- p +
-          aes(col = Region, z = Region) +
-          ggrepel::geom_label_repel(aes(label = Region), color = "black",
+          aes(col = colgp, z = Region) +
+          ggrepel::geom_label_repel(aes(label = colgp), color = "black",
                                     data = . %>% filter(Date == latest_date)) +
           theme(legend.position = "none")
       },
       Counties = {
         p <- p + 
-          aes(col = County, z = County) + 
-          ggrepel::geom_label_repel(aes(label = County), color = "black",
+          aes(col = colgp, z = County) + 
+          ggrepel::geom_label_repel(aes(label = colgp), color = "black",
                                     data = . %>% filter(Date == latest_date)) +
           theme(legend.position = "none")
         
@@ -448,21 +462,49 @@ server <- function(input, output) {
         sort(req(input$country))
       })
   }) 
+  allcases_reactive <- reactive({
+    switch(
+      req(input$states),
+      Counties = {
+        cases_county %>%
+          filter(State %in% input$state) %>%
+          mutate(colgp = ifelse(County %in% units_reactive(),
+                                County,
+                                ""))
+      },
+      States = {
+        cases_state %>% 
+          filter(Region %in% input$country_cds) %>%
+          mutate(colgp = ifelse(State %in% units_reactive(),
+                                State,
+                                ""))
+      },
+      Countries = {
+        cases %>%
+          mutate(colgp = ifelse(Region %in% units_reactive(),
+                                Region,
+                                ""))
+      })
+  })
+  
   cases_reactive <- reactive({
     switch(
       req(input$states),
       Counties = {
         cases_county %>% 
-          filter(County %in% units_reactive())
+          filter(County %in% units_reactive()) %>%
+          mutate(colgp = County)
       },
       States = {
         cases_state %>% 
           filter(Region %in% input$country_cds, 
-                 State %in% units_reactive())
+                 State %in% units_reactive()) %>%
+          mutate(colgp = State)
       },
       Countries = {
         cases %>% 
-          filter(Region %in% units_reactive())
+          filter(Region %in% units_reactive()) %>%
+          mutate(colgp = Region)
       })
   })
   
