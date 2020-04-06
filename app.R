@@ -67,6 +67,7 @@ real_cases_cds <- function() {
   }
   read.csv(dirpath) %>%
     filter(city == "") %>% # remove any city level data
+    filter(county != "") %>% # remove state/region aggregate counts
     filter(type %in% c("cases", "deaths", "recovered")) %>% # also have active, growthFactor for some
     select(type, county, state, country, date, value, population) %>% 
     mutate_at(vars(type, county, state, country), as.character) %>% 
