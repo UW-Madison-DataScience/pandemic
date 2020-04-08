@@ -383,13 +383,16 @@ server <- function(input, output) {
           ungroup
       })
     }
+    dat <- dat %>%
+      filter(Count >= 1)
     
     # Color-blind friendly palette with grey:
     cbPalette <- c("#DDDDDD", "#E69F00", "#56B4E9", "#009E73",
                    "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
     if(!isTruthy(input$showall))
       cbPalette <- cbPalette[-1]
-    p <- ggplot(dat %>% filter(Count >= 1)) +
+    
+    p <- ggplot(dat) +
       scale_colour_manual(values=cbPalette)
     
     p <- suppressWarnings(p +
@@ -537,8 +540,13 @@ server <- function(input, output) {
                 multiple = TRUE)
   })
   
-  output$latest <- renderText({paste0("Data is current as of ",
-                                      as.character(max(cases_reactive()$Date)))})
+  output$latest <- renderText({
+    paste0("Current to ",
+           as.character(max(cases$Date)),
+           " (Country), ",
+           as.character(max(cases_state$Date)),
+           " (State & County).")})
+  
   # Fit line for real cases.
   output$fitcase <- renderTable({
     req(input$states, input$casetypes)

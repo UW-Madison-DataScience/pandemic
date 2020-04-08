@@ -20,5 +20,6 @@ During testing, it is helpful to have a local copy of the timeseries data.
 dirpath <- "https://coronadatascraper.com/timeseries-tidy.csv"
 tmp <- read.csv(dirpath)
 dirpath <- "data/timeseries-tidy.csv"
-write.csv(tmp, dirpath, col.names = FALSE)
+write.csv(tmp, dirpath)
 ```
+
