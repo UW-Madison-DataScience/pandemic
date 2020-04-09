@@ -61,13 +61,19 @@ real_cases_cds <- function() {
   # data downloaded from "https://coronadatascraper.com/timeseries-tidy.csv"
   # takes too long in the shiny app to download the data each time (34 seconds).  Need to 
   #  manually update the file in the application for this one to work
-  dirpath <- "data/timeseries-tidy.csv"
+  #
+  # Note that around 5 April the timeseries format changed with more columns
+  # and update of tidy version seems to have broken down.
+  # See added line below to "tidy up"
+  
+  dirpath <- "data/timeseries.csv"
   if(!file.exists(dirpath)) {
-    dirpath <- "https://coronadatascraper.com/timeseries-tidy.csv"
+    dirpath <- "https://coronadatascraper.com/timeseries.csv"
   }
   read.csv(dirpath) %>%
     filter(city == "") %>% # remove any city level data
     filter(county != "") %>% # remove state/region aggregate counts
+    pivot_longer(cases:tested, names_to = "type", values_to = "value") %>% # tidy up
     filter(type %in% c("cases", "deaths", "recovered")) %>% # also have active, growthFactor for some
     select(type, county, state, country, date, value, population) %>% 
     mutate_at(vars(type, county, state, country), as.character) %>% 
