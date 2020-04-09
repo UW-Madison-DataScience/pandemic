@@ -7,12 +7,21 @@ Use by the following sequence (once package is installed):
 app.R
 ```
 
-This app is now live at <https://brianyandell.shinyapps.io/pandemic/>.
+This app was now live at <https://brianyandell.shinyapps.io/pandemic/>,
+but is now hosted at <https://data-viz.it.wisc.edu/pandemic/>.
+
 It was deployed using 
 
 ```
 rsconnect::deployApp(appFiles = "app.R")
 ```
+
+The redirect app is
+
+```
+rsconnect::deployApp(appFiles = "redirect.R")
+```
+
 
 During testing, it is helpful to have a local copy of the timeseries data.
 
