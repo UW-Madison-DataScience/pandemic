@@ -16,13 +16,6 @@ It was deployed using
 rsconnect::deployApp(appFiles = "app.R")
 ```
 
-The redirect app is
-
-```
-rsconnect::deployApp(appFiles = "redirect.R")
-```
-
-
 During testing, it is helpful to have a local copy of the timeseries data.
 
 ```

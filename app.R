@@ -218,7 +218,7 @@ ui <- fluidPage(
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric","new_cases")),
           checkboxInput("predict", "Add predict lines?", FALSE),
-          checkboxInput("showall", "Show all units?", FALSE),
+          uiOutput("showallui"),
           hr(),
           textOutput("latest")
         ),
@@ -228,7 +228,9 @@ ui <- fluidPage(
           uiOutput("onep3"),
           conditionalPanel(
             condition = 'input.realscale == "new_cases"',
-            textOutput("newcases"))
+            textOutput("newcases")),
+          uiOutput("topcasestxt"),
+          tableOutput("topcases")
           )
       )
     ),
@@ -319,6 +321,10 @@ server <- function(input, output) {
     tagList("Source URL:", sourceurl)
   })
   
+  output$showallui <- renderUI({
+    units <- paste0("Show all ", req(input$states), "?")
+    checkboxInput("showall", units, FALSE)
+  })
   output$main_plot <- renderPlot({
     
     dat <- double_cases(input$Confirmed0,
@@ -393,8 +399,10 @@ server <- function(input, output) {
       filter(Count >= 1)
     
     # Color-blind friendly palette with grey:
-    cbPalette <- c("#DDDDDD", "#E69F00", "#56B4E9", "#009E73",
-                   "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+    cbPalette <- c("#DDDDDD", 
+                   rep_len(c("#E69F00", "#56B4E9", "#009E73",
+                             "#F0E442", "#0072B2", "#D55E00", "#CC79A7"),
+                           length(units_reactive())))
     if(!isTruthy(input$showall))
       cbPalette <- cbPalette[-1]
     
@@ -627,6 +635,52 @@ server <- function(input, output) {
     })
   })
   
+  # Show table of top cases
+  output$topcases <- renderTable({
+    topnum <- 5
+    # Get last date.
+    switch(input$states,
+           States = {
+             allcases_reactive() %>% 
+               filter(!(State %in% units_reactive())) %>%
+               group_by(Type, State) %>%
+               summarize(Count = max(Count, na.rm = TRUE)) %>%
+               ungroup %>%
+               arrange(desc(Count)) %>%
+               select(Type, State, Count) %>%
+               mutate(Count = as.integer(Count)) %>%
+               pivot_wider(names_from = Type, values_from = Count) %>%
+               top_n(topnum, Confirmed) %>%
+               arrange(desc(Confirmed))
+           },
+           Countries = {
+             allcases_reactive() %>% 
+               filter(!(Region %in% units_reactive())) %>%
+               group_by(Type, Region) %>%
+               summarize(Count = max(Count, na.rm = TRUE)) %>%
+               ungroup %>%
+               select(Type, Region, Count) %>%
+               mutate(Count = as.integer(Count)) %>%
+               pivot_wider(names_from = Type, values_from = Count) %>%
+               top_n(topnum, Confirmed) %>%
+               arrange(desc(Confirmed))
+           },
+           Counties = {
+             allcases_reactive() %>% 
+               filter(!(County %in% units_reactive())) %>%
+               group_by(Type, County) %>% 
+               summarize(Count = max(Count, na.rm = TRUE)) %>% 
+               ungroup %>% 
+               mutate(Count = as.integer(Count)) %>% 
+               pivot_wider(names_from = Type, values_from = Count) %>%
+               top_n(topnum, Confirmed) %>%
+               arrange(desc(Confirmed))
+           })
+  })
+  output$topcasestxt <- renderUI({
+    tagList("Other top", input$states, "confirmed:")
+  })
+
   output$testplot <- renderPlot({
     req(input$teststate)
     switch(

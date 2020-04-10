@@ -10,3 +10,5 @@ R/
 *.Rproj
 # rsconnect/
 *.csv
+*.zip
+rsconnect/shinyapps.io
