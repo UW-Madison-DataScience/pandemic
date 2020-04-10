@@ -1,0 +1,13 @@
+name: pandemic
+title: pandemic
+username: spkent
+account: spkent
+server: data-viz.it.wisc.edu
+hostUrl: https://data-viz.it.wisc.edu/__api__
+appId: 19
+bundleId: 35
+url: https://data-viz.it.wisc.edu/content/19/
+when: 1586535800.00653
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .Rbuildignore|deploy.Rmd|DESCRIPTION|pandemic.R|pennmed.txt|README.md|redirect.R|ten_hundred.R|wi.R

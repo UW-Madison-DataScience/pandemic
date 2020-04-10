@@ -2,10 +2,11 @@
 .Rhistory
 .RData
 .Ruserdata
+.Rbuildignore
 *.pdf
 *.docx
 *.html
 R/
 *.Rproj
-rsconnect/
+# rsconnect/
 *.csv
