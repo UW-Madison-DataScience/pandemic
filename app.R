@@ -220,7 +220,8 @@ ui <- fluidPage(
           checkboxInput("predict", "Add predict lines?", FALSE),
           uiOutput("showallui"),
           hr(),
-          textOutput("latest")
+          textOutput("latest"),
+          uiOutput("newhost")
         ),
         mainPanel(
           plotOutput(outputId = "case_plot"),
@@ -560,6 +561,12 @@ server <- function(input, output) {
            " (Country), ",
            as.character(max(cases_state$Date)),
            " (State & County).")})
+  
+  newhost <- a("data-viz.it.wisc.edu/pandemic", 
+                  href="https://data-viz.it.wisc.edu/pandemic/")
+  output$newhost <- renderUI({
+    tagList("New URL:", newhost)
+  })
   
   # Fit line for real cases.
   output$fitcase <- renderTable({
