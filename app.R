@@ -166,6 +166,12 @@ continents <- distinct(cases, Continent, Region) %>%
   filter(!is.na(Continent)) %>%
   arrange(Continent)
 continent_names <- unique(continents$Continent)
+cases_continent <- cases %>%
+  filter(!is.na(Continent)) %>%
+  group_by(Type, Continent, Date, Weight) %>%
+  summarize(Count = sum(Count)) %>%
+  ungroup  
+  
 
 # Coronadatascraper Data. Using this for State and County
 cases_state <- real_cases_cds()
@@ -208,7 +214,7 @@ ui <- fluidPage(
       sidebarLayout(
         sidebarPanel(
           h4("Select data to view from the options below."),
-          radioButtons("states", "", c("Counties", "States","Countries"), inline = TRUE, selected = "States"),
+          radioButtons("states", "", c("Counties", "States","Countries","Continents"), inline = TRUE, selected = "States"),
           conditionalPanel(
             condition = 'input.states == "Countries"',
             selectInput("continent", "Continents:",
@@ -217,7 +223,7 @@ ui <- fluidPage(
             uiOutput("country_cont"),
           ),
           conditionalPanel(
-            condition = 'input.states != "Countries"',
+            condition = 'input.states == "Counties" || input.states == "States"',
             tagList(
               selectInput("country_cds", "Countries:", 
                           regions_cds,
@@ -233,7 +239,10 @@ ui <- fluidPage(
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric","new_cases")),
           checkboxInput("predict", "Add predict lines?", FALSE),
-          uiOutput("showallui"),
+          conditionalPanel(
+            condition = 'input.states != "Continents"',
+            uiOutput("showallui")
+          ),
           hr(),
           textOutput("latest"),
           uiOutput("newhost")
@@ -245,8 +254,10 @@ ui <- fluidPage(
           conditionalPanel(
             condition = 'input.realscale == "new_cases"',
             textOutput("newcases")),
-          uiOutput("topcasestxt"),
-          tableOutput("topcases")
+          conditionalPanel(
+            condition = 'input.states != "Continents"',
+            uiOutput("topcasestxt"),
+            tableOutput("topcases"))
           )
       )
     ),
@@ -410,6 +421,12 @@ server <- function(input, output) {
             mutate(Count = tmpfn(Count)) %>%
           ungroup
       },
+      Continents = {
+        dat <- dat %>%
+          group_by(Continent) %>%
+            mutate(Count = tmpfn(Count)) %>%
+          ungroup
+      },
       Countries = {
         dat <- dat %>% 
           group_by(Region) %>%
@@ -448,6 +465,13 @@ server <- function(input, output) {
       States = {
         p <- p +
           aes(col = colgp, z = State) +
+          ggrepel::geom_label_repel(aes(label = colgp), color = "black",
+                                    data = . %>% filter(Date == latest_date)) +
+          theme(legend.position = "none")
+      },
+      Continents = {
+        p <- p +
+          aes(col = colgp, z = Continent) +
           ggrepel::geom_label_repel(aes(label = colgp), color = "black",
                                     data = . %>% filter(Date == latest_date)) +
           theme(legend.position = "none")
@@ -505,6 +529,9 @@ server <- function(input, output) {
       },
       Countries = {
         sort(req(input$country))
+      },
+      Continents = {
+        sort(continent_names)
       })
   }) 
   allcases_reactive <- reactive({
@@ -523,6 +550,10 @@ server <- function(input, output) {
           mutate(colgp = ifelse(State %in% units_reactive(),
                                 State,
                                 ""))
+      },
+      Continents = {
+        cases_continent %>% 
+          mutate(colgp = Continent)
       },
       Countries = {
         continents_in <- continent_names
@@ -550,6 +581,10 @@ server <- function(input, output) {
           filter(Region %in% input$country_cds, 
                  State %in% units_reactive()) %>%
           mutate(colgp = State)
+      },
+      Continents = {
+        cases_continent %>% 
+          mutate(colgp = Continent)
       },
       Countries = {
         cases %>% 
@@ -618,6 +653,9 @@ server <- function(input, output) {
           States = {
             form <- formula(Count ~ Date * State)
           },
+          Continents = {
+            form <- formula(Count ~ Date * Continent)
+          },
           Countries = {
             form <- formula(Count ~ Date * Region)
           })
@@ -668,6 +706,16 @@ server <- function(input, output) {
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
         ungroup %>% 
         arrange(County) %>% 
+        mutate(Count = as.integer(Count)) %>% 
+        pivot_wider(names_from = Type, values_from = Count) %>% 
+        mutate(Doubling = doubling)},
+    Continents = {
+      cases_reactive() %>% 
+        # filter(Type == input$casetypes)
+        group_by(Type, Continent) %>% 
+        summarize(Count = max(Count, na.rm = TRUE)) %>% 
+        ungroup %>% 
+        arrange(Continent) %>% 
         mutate(Count = as.integer(Count)) %>% 
         pivot_wider(names_from = Type, values_from = Count) %>% 
         mutate(Doubling = doubling)
