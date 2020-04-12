@@ -7,6 +7,7 @@ suppressMessages({
   library(readr)
   library(ggrepel)
   library(RcppRoll)
+  library(countrycode)
 })
 
 double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
@@ -54,6 +55,11 @@ real_cases_county <- function() {
     group_by(Type, County, State, Region, Date) %>%
     summarize(Count = sum(Count, na.rm = TRUE)) %>%
     ungroup %>%
+    # Remove any date for region with 0 confirmed.
+    pivot_wider(names_from = Type, values_from = Count) %>%
+    filter(Confirmed > 0) %>%
+    pivot_longer(Confirmed:Recovered, names_to = "Type", values_to = "Count") %>%
+    filter(!is.na(Count)) %>%
     weight_date()
 }
 
@@ -150,7 +156,16 @@ real_cases <- function(cases_state) {
 # JHU Data. Only has State for a few countries.
 cases_county <- real_cases_county()
 cases_state <- real_cases_state(cases_county)
-cases <- real_cases(cases_state)
+cases <- real_cases(cases_state) %>%
+  mutate(Continent = 
+           countrycode(Region,
+            origin = "country.name",
+            destination = "continent",
+            warn = FALSE))
+continents <- distinct(cases, Continent, Region) %>%
+  filter(!is.na(Continent)) %>%
+  arrange(Continent)
+continent_names <- unique(continents$Continent)
 
 # Coronadatascraper Data. Using this for State and County
 cases_state <- real_cases_cds()
@@ -196,10 +211,10 @@ ui <- fluidPage(
           radioButtons("states", "", c("Counties", "States","Countries"), inline = TRUE, selected = "States"),
           conditionalPanel(
             condition = 'input.states == "Countries"',
-            selectInput("country", "Countries:", 
-                        regions,
-                        c("USA", "Iran", "Italy", "Korea, South"),
-                        multiple = TRUE)
+            selectInput("continent", "Continents:",
+                        continent_names, "",
+                        multiple = TRUE),
+            uiOutput("country_cont"),
           ),
           conditionalPanel(
             condition = 'input.states != "Countries"',
@@ -308,6 +323,18 @@ ui <- fluidPage(
 # Define server logic to plot various variables against mpg ----
 server <- function(input, output) {
   
+  output$country_cont <- renderUI({
+    sregions <- regions
+    if(length(input$continent)) {
+      sregions <- 
+        sort((continents %>% 
+                filter(Continent %in% input$continent))$Region)
+    }
+    selectInput("country", "Countries:", 
+                sregions,
+                c("USA", "Iran", "Italy", "Korea, South"),
+                multiple = TRUE)
+  })
   output$main_text <- renderText("Simulation based on article by Liz Specht STAT (10 March 2020)")
 
   url <- a("Simple Math, Alarming Answers", 
@@ -396,8 +423,8 @@ server <- function(input, output) {
           ungroup
       })
     }
-    dat <- dat %>%
-      filter(Count >= 1)
+#    dat <- dat %>%
+#      filter(Count >= 1)
     
     # Color-blind friendly palette with grey:
     cbPalette <- c("#DDDDDD", 
@@ -416,7 +443,7 @@ server <- function(input, output) {
       ggtitle(paste(input$casetypes, "cases")))
     
     latest_date <- max(dat$Date)
-    if(length(units_reactive()) > 1) {
+    if(length(units_reactive()) > 1 | isTruthy(input$showall)) {
       switch(input$states,
       States = {
         p <- p +
@@ -498,7 +525,12 @@ server <- function(input, output) {
                                 ""))
       },
       Countries = {
+        continents_in <- continent_names
+        if(length(input$continent)) {
+          continents_in <- input$continent
+        }
         cases %>%
+          filter(Continent %in% continents_in) %>%
           mutate(colgp = ifelse(Region %in% units_reactive(),
                                 Region,
                                 ""))
@@ -605,7 +637,7 @@ server <- function(input, output) {
       names(coefs) <- units_reactive()
     }
     # Rate cannot be negative, but could be really small.
-    doubling <- log(2) / pmax(0, coefs) / 86400
+    doubling <- round(log(2) / pmax(0, coefs) / 86400, 1)
     
     # Get last date.
     switch(input$states,
