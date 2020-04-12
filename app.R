@@ -332,7 +332,7 @@ server <- function(input, output) {
     }
     selectInput("country", "Countries:", 
                 sregions,
-                c("USA", "Iran", "Italy", "Korea, South"),
+                c("USA", "France", "Iran", "Italy", "Spain"),
                 multiple = TRUE)
   })
   output$main_text <- renderText("Simulation based on article by Liz Specht STAT (10 March 2020)")
