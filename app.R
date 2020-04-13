@@ -258,14 +258,17 @@ ui <- fluidPage(
       sidebarLayout(
         sidebarPanel(
           h4("Select data to view from the options below."),
-          radioButtons("states", "", c("Counties", "States","Countries","Continents"), inline = TRUE, selected = "States"),
+          radioButtons("states", "", c("Counties", "States","Countries","Regions","Continents"), inline = TRUE, selected = "States"),
           conditionalPanel(
-            condition = 'input.states == "Countries"',
+            condition = 'input.states == "Countries" || input.states == "Regions"',
             selectInput("continent", "Continents:",
                         continent_names, "",
                         multiple = TRUE),
-            uiOutput("region_cont"),
-            uiOutput("country_cont"),
+            uiOutput("region_cont")
+          ),
+          conditionalPanel(
+            condition = 'input.states == "Countries"',
+            uiOutput("country_cont")
           ),
           conditionalPanel(
             condition = 'input.states == "States"',
@@ -408,8 +411,6 @@ server <- function(input, output) {
     }
     if(!isTruthy(selected <- input$region)) {
       selected <- ""
-    } else {
-      selected <- selected[selected %in% sregions]
     }
     selectInput("region", "Regions:",
                 sregions, selected,
@@ -420,10 +421,10 @@ server <- function(input, output) {
     if(!isTruthy(selected <- input$country)) {
       selected <- c("USA", "France", "Iran", "Italy", "Spain")
     }
-    selected <- selected[selected %in% countries_reactive()]
+    choices <- sort(unique(c(selected, countries_reactive())))
 
     selectInput("country", "Countries:", 
-                countries_reactive(),
+                choices,
                 selected,
                 multiple = TRUE)
   })
@@ -624,8 +625,11 @@ server <- function(input, output) {
       Countries = {
         sort(req(input$country))
       },
-      Countries = {
-        sort(req(input$region))
+      Regions = {
+        if(!isTruthy(regions <- input$region)) {
+          regions <- region_names
+        }
+        sort(regions)
       },
       Continents = {
         sort(continent_names)
@@ -733,6 +737,7 @@ server <- function(input, output) {
     } else {
       selected <- c("WI","MI","IL","IA")
     }
+    states_country <- sort(unique(c(selected, states_country)))
     
     selectInput("state", "States:", 
                 states_country,
@@ -788,6 +793,9 @@ server <- function(input, output) {
           Continents = {
             form <- formula(Count ~ Date * Continent)
           },
+          Regions = {
+            form <- formula(Count ~ Date * Region)
+          },
           Countries = {
             form <- formula(Count ~ Date * Country)
           })
@@ -816,41 +824,53 @@ server <- function(input, output) {
         group_by(Type, State) %>%
         summarize(Count = max(Count, na.rm = TRUE)) %>%
         ungroup %>%
-        arrange(State) %>%
         select(Type, State, Count) %>%
         mutate(Count = as.integer(Count)) %>%
         pivot_wider(names_from = Type, values_from = Count) %>%
-        mutate(Doubling = doubling)},
+        mutate(Doubling = doubling) %>%
+        arrange(desc(Confirmed))
+    },
     Countries = {
       cases_reactive() %>% 
         group_by(Type, Country) %>%
         summarize(Count = max(Count, na.rm = TRUE)) %>%
         ungroup %>%
-        arrange(Country) %>%
         select(Type, Country, Count) %>%
         mutate(Count = as.integer(Count)) %>%
         pivot_wider(names_from = Type, values_from = Count) %>%
-        mutate(Doubling = doubling)},
+        mutate(Doubling = doubling) %>%
+        arrange(desc(Confirmed))
+    },
     Counties = {
       cases_reactive() %>% 
-        # filter(Type == input$casetypes)
         group_by(Type, County) %>% 
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
         ungroup %>% 
-        arrange(County) %>% 
         mutate(Count = as.integer(Count)) %>% 
         pivot_wider(names_from = Type, values_from = Count) %>% 
-        mutate(Doubling = doubling)},
+        mutate(Doubling = doubling) %>%
+        arrange(desc(Confirmed))
+    },
+    Regions = {
+      cases_reactive() %>% 
+        group_by(Type, Region) %>% 
+        summarize(Count = max(Count, na.rm = TRUE)) %>% 
+        ungroup %>% 
+        mutate(Count = as.integer(Count)) %>% 
+        pivot_wider(names_from = Type, values_from = Count) %>% 
+        mutate(Doubling = doubling) %>%
+        arrange(desc(Confirmed))
+    },
     Continents = {
       cases_reactive() %>% 
         # filter(Type == input$casetypes)
         group_by(Type, Continent) %>% 
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
         ungroup %>% 
-        arrange(Continent) %>% 
         mutate(Count = as.integer(Count)) %>% 
         pivot_wider(names_from = Type, values_from = Count) %>% 
-        mutate(Doubling = doubling)
+        mutate(Doubling = doubling) %>%
+        arrange(desc(Confirmed))
     })
   })
   
@@ -867,6 +887,18 @@ server <- function(input, output) {
                ungroup %>%
                arrange(desc(Count)) %>%
                select(Type, State, Count) %>%
+               mutate(Count = as.integer(Count)) %>%
+               pivot_wider(names_from = Type, values_from = Count) %>%
+               top_n(topnum, Confirmed) %>%
+               arrange(desc(Confirmed))
+           },
+           Regions = {
+             allcases_reactive() %>% 
+               filter(!(Region %in% units_reactive())) %>%
+               group_by(Type, Region) %>%
+               summarize(Count = max(Count, na.rm = TRUE)) %>%
+               ungroup %>%
+               select(Type, Region, Count) %>%
                mutate(Count = as.integer(Count)) %>%
                pivot_wider(names_from = Type, values_from = Count) %>%
                top_n(topnum, Confirmed) %>%
