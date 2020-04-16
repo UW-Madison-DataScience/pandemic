@@ -396,24 +396,25 @@ server <- function(input, output) {
       sregions <- sort(input$region)
     }
     if(length(input$continent)) {
-      sregions <- sort((continents %>%
+      sregions <- sort(unique((continents %>%
                           filter(Continent %in% input$continent,
-                                 Region %in% sregions))$Region)
+                                 Region %in% sregions))$Region))
     }
     sregions
   })
 
   output$region_cont <- renderUI({
+    if(!isTruthy(selected <- input$region)) {
+      selected <- NULL
+    }
     sregions <- region_names
     if(length(input$continent)) {
-      sregions <- sort((continents %>% 
-                         filter(Continent %in% input$continent))$Region)
+      sregions <- sort(unique((continents %>%
+                                 filter(Continent %in% input$continent))$Region))
     }
-    if(!isTruthy(selected <- input$region)) {
-      selected <- ""
-    }
+    choices <- sort(unique(c(selected, sregions)))
     selectInput("region", "Regions:",
-                sregions, selected,
+                choices, selected,
                 multiple = TRUE)
   })
   
@@ -491,9 +492,8 @@ server <- function(input, output) {
     if(req(input$realscale) == "new_cases") {
       tmpfn <- function(Count) {
         dc <- diff(Count)
-        c(first(Count), 
-          roll_mean(c(first(Count), dc), 3),
-          last(dc))
+        c(rep(first(dc), 2), 
+          roll_mean(c(first(Count), dc), 3))
       }
       switch(input$states,
       States = {
@@ -592,16 +592,20 @@ server <- function(input, output) {
     }
 
     if(isTruthy(input$predict)) {
+      # Set vertical range by data.
+      p <- p +
+        ylim(min(dat$Count), max(dat$Count))
+      
       if(input$states == "States") {
         p <- suppressWarnings(p + 
           geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
-                      formula = y ~ x,
+                      formula = round(y) ~ x,
                       method.args = list(family = "poisson"),
                       linetype = "dashed"))
       } else {
         p <- suppressWarnings(p + 
           geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
-                      formula = y ~ x,
+                      formula = round(y) ~ x,
                       method.args = list(family = "poisson"),
                       linetype = "dashed"))
       }
@@ -627,7 +631,7 @@ server <- function(input, output) {
       },
       Regions = {
         if(!isTruthy(regions <- input$region)) {
-          regions <- region_names
+          regions <- regions_reactive()
         }
         sort(regions)
       },
@@ -657,12 +661,7 @@ server <- function(input, output) {
           mutate(colgp = Continent)
       },
       Regions = {
-        continents_in <- continent_names
-        if(length(input$continent)) {
-          continents_in <- input$continent
-        }
         cases_region %>%
-          filter(Continent %in% continents_in) %>%
           mutate(colgp = ifelse(Region %in% units_reactive(),
                                 Region,
                                 ""))
@@ -994,7 +993,7 @@ server <- function(input, output) {
   output$onep3 <- renderUI({
     tagList("See", pointacres, "for additional county updates.")
   })
-  output$newcases <- renderText("New cases are 3-day averages.")
+  output$newcases <- renderText("New cases are averages of last 3-days.")
   
   # U Penn Medicine
   pennmed <- a("penn-chime.phl.io/", 
