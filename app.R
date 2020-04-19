@@ -76,6 +76,9 @@ real_cases_cds <- function() {
   if(!file.exists(dirpath)) {
     dirpath <- "https://coronadatascraper.com/timeseries.csv"
   }
+  # Probably need to rethink this, as there are records for whole country,
+  # whole state and county, and they may not add up.
+  # Also population is separate for each of these.
   read.csv(dirpath, stringsAsFactors = FALSE) %>%
     filter(city == "") %>% # remove any city level data
     
@@ -295,11 +298,11 @@ ui <- fluidPage(
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric","new_cases")),
           fluidRow(
-            column(4,
+            column(6,
                    checkboxInput("predict", "Predict lines?", FALSE)),
-            column(4,
-                   checkboxInput("rate", "Rates?", FALSE)),
-            column(4,
+#            column(4,
+#                   checkboxInput("rate", "Rates?", FALSE)),
+            column(6,
                    conditionalPanel(
                      condition = 'input.states != "Continents"',
                      uiOutput("showallui")))
