@@ -254,7 +254,7 @@ ui <- fluidPage(
   
   # Sidebar panel for inputs ----
   tabsetPanel(
-    tabPanel("Real Cases",
+    tabPanel("Reported Cases",
       sidebarLayout(
         sidebarPanel(
           h4("Select data to view from the options below."),
@@ -294,10 +294,15 @@ ui <- fluidPage(
           ),
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric","new_cases")),
-          checkboxInput("predict", "Add predict lines?", FALSE),
-          conditionalPanel(
-            condition = 'input.states != "Continents"',
-            uiOutput("showallui")
+          fluidRow(
+            column(4,
+                   checkboxInput("predict", "Predict lines?", FALSE)),
+            column(4,
+                   checkboxInput("rate", "Rates?", FALSE)),
+            column(4,
+                   conditionalPanel(
+                     condition = 'input.states != "Continents"',
+                     uiOutput("showallui")))
           ),
           hr(),
           textOutput("latest"),
@@ -354,7 +359,7 @@ ui <- fluidPage(
     tabPanel("References",
       textOutput("summary"),
       
-      # Real Cases
+      # Reported Cases
       textOutput("space1"),
       textOutput("summary2"),
       textOutput("jhudata"),
@@ -444,7 +449,7 @@ server <- function(input, output) {
   })
   
   output$showallui <- renderUI({
-    units <- paste0("Show all ", req(input$states), "?")
+    units <- paste0("All ", req(input$states), "?")
     checkboxInput("showall", units, FALSE)
   })
   output$main_plot <- renderPlot({
@@ -479,7 +484,7 @@ server <- function(input, output) {
   Slowing the days to double by social distancing buys time. Adjust sliders to view changes."
   )
 
-  # Plot real cases.
+  # Plot reported cases.
   output$case_plot <- renderPlot({
     req(input$states, input$casetypes)
     if(isTruthy(input$showall)) {
@@ -771,11 +776,11 @@ server <- function(input, output) {
     tagList("New URL:", newhost)
   })
   
-  # Fit line for real cases.
+  # Fit line for reported cases.
   output$fitcase <- renderTable({
     req(input$states, input$casetypes)
 
-    # Get estimate doubling rate
+    # Get estimate doubling time
     if(length(units_reactive() > 1)) {
       req(units_reactive())
       if(length(units_reactive()) == 1) {
@@ -813,7 +818,7 @@ server <- function(input, output) {
       coefs <- coefs[str_detect(names(coefs), "Date")]
       names(coefs) <- units_reactive()
     }
-    # Rate cannot be negative, but could be really small.
+    # Time cannot be negative, but could be really small.
     doubling <- round(log(2) / pmax(0, coefs) / 86400, 1)
     
     # Get last date.
@@ -962,7 +967,7 @@ server <- function(input, output) {
   output$space4 <- renderText("---")
   output$space5 <- renderText("---")
   output$jhudata <- renderText(
-    "Real cases (Country level) come from Johns Hopkins U Center for Systems Science and Engineering."
+    "Reported cases (Country level) come from Johns Hopkins U Center for Systems Science and Engineering."
   )
   sourcejhu <- a("github.com/CSSEGISandData/COVID-19", 
                  href="https://github.com/CSSEGISandData/COVID-19")
@@ -971,7 +976,7 @@ server <- function(input, output) {
   })
   sourcecds <- a("https://coronadatascraper.com/", href = "https://coronadatascraper.com/#home")
   output$cdsdata <- renderUI({
-    tagList("Real cases (State and County level) come from Corona Data Scraper:", sourcecds)
+    tagList("Reported cases (State and County level) come from Corona Data Scraper:", sourcecds)
   })
   output$testinfo <- renderText(
     "Test data compiled by COVID Testing Project."
@@ -1038,7 +1043,7 @@ server <- function(input, output) {
     number of actual cases and number of hospital beds.
     Does our community have enough hospital beds?'})
   output$summary2 <- renderText({
-    '"Real Cases" tab draws on Johns Hopkins U CSSE, which many apps are using.
+    '"Reported Cases" tab draws on Johns Hopkins U CSSE, which many apps are using.
     Doubling time (days) is estimated via Poisson regression with exponential weights
     (heavier weight on recent dates)
     using ONLY confirmed cases.
