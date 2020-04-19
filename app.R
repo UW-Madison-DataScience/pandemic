@@ -25,7 +25,7 @@ double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
                  values_to = "Count")
 }
 
-real_cases_county <- function() {
+real_cases_jhu <- function() {
   # These data were modified 3/22 to only have one line per unit and changed names.
   # Province/State is no longer meaningful for USA.
   dirpath <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series"
@@ -51,7 +51,8 @@ real_cases_county <- function() {
            State = ifelse(State %in% state.name, 
                           state.abb[match(State, state.name)], 
                           State),
-           Country = ifelse(Country == "US", "USA", Country)) %>%
+           Country = ifelse(Country == "US", "USA", Country),
+           Country = ifelse(str_detect(Country, "Taiwan"), "Taiwan", Country)) %>%
     group_by(Type, County, State, Country, Date) %>%
     summarize(Count = sum(Count, na.rm = TRUE)) %>%
     ungroup %>%
@@ -83,25 +84,20 @@ real_cases_cds <- function() {
     filter(city == "") %>% # remove any city level data
     
     mutate(country = ifelse(country == "United States", "USA", country),
-           country = ifelse(country == "iso1:US", "USA", country)) %>%
-    
-    # Next line works for USA, but may be problem for other countries.
-    # From here assume counties get combined into states.
-    filter(!(county == "" & 
-             country %in% c("USA", "United Kingdom"))) %>% # remove state/Country aggregate counts
-    
+           country = ifelse(country == "iso1:US", "USA", country),
+           country = ifelse(country == "Metropolitan France", "France", country)) %>%
+
     pivot_longer(cases:tested, names_to = "type", values_to = "value") %>% # tidy up
     filter(type %in% c("cases", "deaths", "recovered")) %>% # also have active, growthFactor for some
-    select(type, county, state, country, date, value, population) %>% 
-    mutate_at(vars(type, county, state, country), as.character) %>% 
+    select(type, level, county, state, country, date, value, population) %>% 
     mutate(date = as.POSIXct(as.character(date), format="%Y-%m-%d")) %>% 
-    mutate(county = paste0(county, ", ", state)) %>% 
     rename(
       Type = type,
       County = county,
       State = state,
       Country = country,
       Date = date,
+      Population = population,
       Count = value
     ) %>% 
     mutate(Type = case_when(
@@ -111,7 +107,7 @@ real_cases_cds <- function() {
       TRUE ~ NA_character_
     )) %>%
     as_tibble() %>%
-    filter(State != "") %>%
+    # Fix USA state names.
     mutate(State = str_remove(State, "^iso2:US-"),
            State = ifelse(State %in% state.name, 
                           state.abb[match(State, state.name)], 
@@ -121,14 +117,33 @@ real_cases_cds <- function() {
 
 real_cases_county_cds <- function(cases_cds) {
   cases_cds %>% 
-    filter(County != "") %>%
+    filter(County != "",
+           level == "county") %>%
     filter(!str_detect(County, "^,"),
            !str_detect(County, "unassign")) %>%
-    mutate(County = ifelse(State %in% state.abb, 
+    mutate(County = paste0(County, ", ", State),
+           County = ifelse(State %in% state.abb, 
                            str_replace(County, 
                                        state.name[match(State, state.abb)],
                                        state.abb[match(State, state.abb)]), 
-                           County))
+                           County)) %>%
+    select(-level)
+}
+
+real_cases_state_cds <- function(cases_cds) {
+  cases_cds %>% 
+    filter(County == "",
+           State != "",
+           level == "state") %>%
+    select(-level, -County)
+}
+
+real_cases_country_cds <- function(cases_cds) {
+  cases_cds %>% 
+    filter(State == "",
+           County == "",
+           level == "country") %>%
+    select(-level, -County, -State)
 }
 
 weight_date <- function(cases_state) {
@@ -146,7 +161,7 @@ weight_date <- function(cases_state) {
     mutate(Weight = exp(skew * Weight) / eweight)
 }
 
-real_cases_state <- function(cases_state) {
+real_cases_state_jhu <- function(cases_state) {
   # Sum within Countrys
   cases_state %>%
     group_by(Type, Country, State, Date, Weight) %>%
@@ -154,7 +169,7 @@ real_cases_state <- function(cases_state) {
     ungroup
 }
 
-real_cases <- function(cases_state) {
+real_cases_country_jhu <- function(cases_state) {
   # Sum within Countrys
   cases_state %>%
     group_by(Type, Country, Date, Weight) %>%
@@ -163,9 +178,9 @@ real_cases <- function(cases_state) {
 }
 
 # JHU Data. Only has State for a few countries.
-cases_county <- real_cases_county()
-cases_state <- real_cases_state(cases_county)
-cases <- real_cases(cases_state) %>%
+cases_county <- real_cases_jhu()
+cases_state <- real_cases_state_jhu(cases_county)
+cases <- real_cases_country_jhu(cases_state) %>%
   mutate(Continent = 
            countrycode(Country,
             origin = "country.name",
@@ -180,28 +195,50 @@ cases <- real_cases(cases_state) %>%
 # 20 regions if used as destination
 continents <- distinct(cases, Continent, Region, Country) %>%
   filter(!is.na(Continent)) %>%
-  arrange(Continent, Region)
+  arrange(Continent, Region) %>%
+  mutate(Country.Code = countrycode(Country,
+                                    origin = "country.name",
+                                    destination = "iso3c",
+                                    warn = FALSE))
+
+# This does not have population for VAT, ERI, ESH or TWN
+population <- read.csv(
+  "https://raw.githubusercontent.com/datasets/population/master/data/population.csv",
+  stringsAsFactors = FALSE) %>%
+  filter(Year == 2018)
+
+continents$Population <- NA
+m <- match(continents$Country.Code, population$Country.Code, nomatch = 0)
+continents$Population[m > 0] <- population$Value[m]
+continents <- continents %>%
+  mutate(Population = ifelse(Country.Code == "TWN", 23.78 * 1e6, Population),
+         Population = ifelse(Country.Code == "VAT", 825, Population),
+         Population = ifelse(Country.Code == "ERI", 3.214 * 1e6, Population),
+         Population = ifelse(Country.Code == "ESH", 500000, Population))
 
 continent_names <- sort(unique(continents$Continent))
 region_names <- sort(unique(continents$Region))
 
+cases <- cases %>%
+  mutate(Population = continents$Population[match(Country, continents$Country)])
 cases_region <- cases %>%
   filter(!is.na(Continent)) %>%
   group_by(Type, Continent, Region, Date, Weight) %>%
-  summarize(Count = sum(Count)) %>%
+  summarize(Count = sum(Count),
+            Population = sum(Population)) %>%
   ungroup  
 cases_continent <- cases_region %>%
   filter(!is.na(Continent)) %>%
   group_by(Type, Continent, Date, Weight) %>%
-  summarize(Count = sum(Count)) %>%
+  summarize(Count = sum(Count),
+            Population = sum(Population)) %>%
   ungroup  
 
 
 # Coronadatascraper Data. Using this for State and County
 # Need to sort out County, State and Country better
 
-cases_state <- real_cases_cds()
-cases_county <- real_cases_county_cds(cases_state) %>%
+cases_country_cds <- real_cases_cds() %>%
   mutate(Continent = 
            countrycode(Country,
                        origin = "country.name",
@@ -212,20 +249,16 @@ cases_county <- real_cases_county_cds(cases_state) %>%
                        origin = "country.name",
                        destination = "region",
                        warn = FALSE))
+cases_county_cds <- real_cases_county_cds(cases_country_cds)
+cases_state_cds <- real_cases_state_cds(cases_country_cds)
+cases_country_cds <- real_cases_country_cds(cases_country_cds)
+
 counties <- sort(unique(cases_county$County))
 countries <- sort(unique(cases$Country))
-# For now, only look at USA. Open up once figure out how to do counties.
-cases_state <- real_cases_state(cases_state) %>%
-  mutate(Continent = 
-           countrycode(Country,
-                       origin = "country.name",
-                       destination = "continent",
-                       warn = FALSE),
-         Region = 
-           countrycode(Country,
-                       origin = "country.name",
-                       destination = "region",
-                       warn = FALSE))
+# For now, use CDS for state and county
+cases_state <- cases_state_cds
+cases_county <- cases_county_cds
+
 countries_state <- sort(unique(cases_state$Country))
 countries_county <- sort(unique(cases_county$Country))
 
@@ -297,15 +330,11 @@ ui <- fluidPage(
           ),
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric","new_cases")),
-          fluidRow(
-            column(6,
-                   checkboxInput("predict", "Predict lines?", FALSE)),
-#            column(4,
-#                   checkboxInput("rate", "Rates?", FALSE)),
-            column(6,
-                   conditionalPanel(
-                     condition = 'input.states != "Continents"',
-                     uiOutput("showallui")))
+          checkboxInput("predict", "Add predict lines?", FALSE),
+          checkboxInput("rate", "Count per 100,000?", FALSE),
+          conditionalPanel(
+            condition = 'input.states != "Continents"',
+            uiOutput("showallui")
           ),
           hr(),
           textOutput("latest"),
@@ -452,7 +481,7 @@ server <- function(input, output) {
   })
   
   output$showallui <- renderUI({
-    units <- paste0("All ", req(input$states), "?")
+    units <- paste0("Show all ", req(input$states), "?")
     checkboxInput("showall", units, FALSE)
   })
   output$main_plot <- renderPlot({
@@ -496,6 +525,10 @@ server <- function(input, output) {
     } else {
       dat <- cases_reactive() %>%
         filter(Type == input$casetypes)
+    }
+    if(isTruthy(input$rate)) {
+      dat <- dat %>%
+        mutate(Count = Count * 100000 / Population)
     }
     if(req(input$realscale) == "new_cases") {
       tmpfn <- function(Count) {
@@ -553,6 +586,11 @@ server <- function(input, output) {
       aes(Date, Count) +
       geom_line(size = 1.5) +
       ggtitle(paste(input$casetypes, "cases")))
+    
+    if(isTruthy(input$rate)) {
+      p <- p + 
+        ylab("Count per 100,000")
+    }
     
     latest_date <- max(dat$Date)
     if(length(units_reactive()) > 1 | isTruthy(input$showall)) {
@@ -824,10 +862,16 @@ server <- function(input, output) {
     # Time cannot be negative, but could be really small.
     doubling <- round(log(2) / pmax(0, coefs) / 86400, 1)
     
-    # Get last date.
+    dat <- cases_reactive()
+    if(isTruthy(input$rate)){
+      dat <- dat %>%
+        mutate(Count = Count * 100000 / Population)
+    }
+    
+    # Get data from last date.
     switch(input$states,
     States = {
-      cases_reactive() %>% 
+      dat %>% 
         group_by(Type, State) %>%
         summarize(Count = max(Count, na.rm = TRUE)) %>%
         ungroup %>%
@@ -838,7 +882,7 @@ server <- function(input, output) {
         arrange(desc(Confirmed))
     },
     Countries = {
-      cases_reactive() %>% 
+      dat %>% 
         group_by(Type, Country) %>%
         summarize(Count = max(Count, na.rm = TRUE)) %>%
         ungroup %>%
@@ -849,7 +893,7 @@ server <- function(input, output) {
         arrange(desc(Confirmed))
     },
     Counties = {
-      cases_reactive() %>% 
+      dat %>% 
         group_by(Type, County) %>% 
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
         ungroup %>% 
@@ -859,7 +903,7 @@ server <- function(input, output) {
         arrange(desc(Confirmed))
     },
     Regions = {
-      cases_reactive() %>% 
+      dat %>% 
         group_by(Type, Region) %>% 
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
         ungroup %>% 
@@ -869,7 +913,7 @@ server <- function(input, output) {
         arrange(desc(Confirmed))
     },
     Continents = {
-      cases_reactive() %>% 
+      dat %>% 
         # filter(Type == input$casetypes)
         group_by(Type, Continent) %>% 
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
@@ -884,10 +928,17 @@ server <- function(input, output) {
   # Show table of top cases
   output$topcases <- renderTable({
     topnum <- 5
-    # Get last date.
+    
+    dat <- allcases_reactive()
+    if(isTruthy(input$rate)){
+      dat <- dat %>%
+        mutate(Count = Count * 100000 / Population)
+    }
+
+    # Get data fro last date.
     switch(input$states,
            States = {
-             allcases_reactive() %>% 
+             dat %>% 
                filter(!(State %in% units_reactive())) %>%
                group_by(Type, State) %>%
                summarize(Count = max(Count, na.rm = TRUE)) %>%
@@ -900,7 +951,7 @@ server <- function(input, output) {
                arrange(desc(Confirmed))
            },
            Regions = {
-             allcases_reactive() %>% 
+             dat %>% 
                filter(!(Region %in% units_reactive())) %>%
                group_by(Type, Region) %>%
                summarize(Count = max(Count, na.rm = TRUE)) %>%
@@ -912,7 +963,7 @@ server <- function(input, output) {
                arrange(desc(Confirmed))
            },
            Countries = {
-             allcases_reactive() %>% 
+             dat %>% 
                filter(!(Country %in% units_reactive())) %>%
                group_by(Type, Country) %>%
                summarize(Count = max(Count, na.rm = TRUE)) %>%
@@ -924,7 +975,7 @@ server <- function(input, output) {
                arrange(desc(Confirmed))
            },
            Counties = {
-             allcases_reactive() %>% 
+             dat %>% 
                filter(!(County %in% units_reactive())) %>%
                group_by(Type, County) %>% 
                summarize(Count = max(Count, na.rm = TRUE)) %>% 
@@ -945,8 +996,7 @@ server <- function(input, output) {
         req(input$testgroup),
         States = {
           p <- ggplot(test_st %>% 
-                        filter(count > 0 & !is.na(count),
-                               state %in% input$teststate)) +
+                        filter(state %in% input$teststate)) +
             aes(date, count, col = state) +
             facet_wrap(~ status, scales = "free_y")
         },
