@@ -121,12 +121,13 @@ real_cases_county_cds <- function(cases_cds) {
            level == "county") %>%
     filter(!str_detect(County, "^,"),
            !str_detect(County, "unassign")) %>%
-    mutate(County = paste0(County, ", ", State),
-           County = ifelse(State %in% state.abb, 
-                           str_replace(County, 
-                                       state.name[match(State, state.abb)],
-                                       state.abb[match(State, state.abb)]), 
-                           County)) %>%
+    mutate(County = str_remove(County, " County")) %>%
+#    mutate(County = paste0(County, ", ", State),
+#           County = ifelse(State %in% state.abb, 
+#                           str_replace(County, 
+#                                       state.name[match(State, state.abb)],
+#                                       state.abb[match(State, state.abb)]), 
+#                           County)) %>%
     select(-level)
 }
 
@@ -280,6 +281,12 @@ read_testing <- function(filename, by_state = FALSE) {
 test_us <- read_testing("https://covidtracking.com/api/us/daily.csv")
 test_st <- read_testing("http://covidtracking.com/api/states/daily.csv", TRUE)
 
+revlog <- scales::trans_new("revlog",
+                            function(x) -log10(x),
+                            function(x) 10^(-x),
+                            scales::log_breaks(base=10),
+                            domain = c(1e-100, Inf))
+
 ##########################################################################33
 
 # Define UI for miles per gallon app ----
@@ -336,6 +343,7 @@ ui <- fluidPage(
             condition = 'input.states != "Continents"',
             uiOutput("showallui")
           ),
+          checkboxInput("recent", "Focus on recent days?", FALSE),
           hr(),
           textOutput("latest"),
           uiOutput("newhost")
@@ -526,10 +534,17 @@ server <- function(input, output) {
       dat <- cases_reactive() %>%
         filter(Type == input$casetypes)
     }
+    
     if(isTruthy(input$rate)) {
       dat <- dat %>%
         mutate(Count = Count * 100000 / Population)
     }
+    
+    if(isTruthy(input$recent)){
+      dat <- dat %>%
+        mutate(Date = 1 + (as.numeric(max(Date) - Date) / 86400))
+    }
+    
     if(req(input$realscale) == "new_cases") {
       tmpfn <- function(Count) {
         dc <- diff(Count)
@@ -568,9 +583,7 @@ server <- function(input, output) {
           ungroup
       })
     }
-#    dat <- dat %>%
-#      filter(Count >= 1)
-    
+
     # Color-blind friendly palette with grey:
     cbPalette <- c("#DDDDDD", 
                    rep_len(c("#E69F00", "#56B4E9", "#009E73",
@@ -592,7 +605,15 @@ server <- function(input, output) {
         ylab("Count per 100,000")
     }
     
-    latest_date <- max(dat$Date)
+    if(isTruthy(input$recent)) {
+      p <- p + 
+        scale_x_continuous(trans = revlog) +
+        xlab("Recent Days")
+      latest_date <- 10
+    } else {
+      latest_date <- max(dat$Date)
+    }
+    
     if(length(units_reactive()) > 1 | isTruthy(input$showall)) {
       switch(input$states,
       States = {
@@ -730,7 +751,8 @@ server <- function(input, output) {
       req(input$states),
       Counties = {
         cases_county %>% 
-          filter(County %in% units_reactive()) %>%
+          filter(County %in% units_reactive(),
+                 State %in% input$state) %>%
           mutate(colgp = County)
       },
       States = {
@@ -800,7 +822,7 @@ server <- function(input, output) {
                    State %in% input$state))$County))
     selectInput("county", "Counties:", 
                 counties_states,
-                c("Dane County, WI","Milwaukee County, WI", "Waukesha County, WI", "Fond du Lac County, WI"),
+                c("Dane","Milwaukee", "Waukesha", "Brown", "Racine", "Walworth", "Kenosha"),
                 multiple = TRUE)
   })
   
