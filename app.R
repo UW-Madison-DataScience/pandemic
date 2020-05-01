@@ -1009,7 +1009,8 @@ server <- function(input, output) {
                  date == max(date)) %>%
           mutate(count = suppressWarnings(as.integer(count))) %>%
           pivot_wider(names_from = status, values_from = count) %>%
-          select(-date)
+          select(-date) %>%
+          arrange(desc(total))
       },
       USA = {
         test_us %>%
