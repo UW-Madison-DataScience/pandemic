@@ -74,8 +74,18 @@ real_cases_cds <- function() {
   # See added line below to "tidy up"
   
   dirpath <- "data/timeseries.csv"
-  if(!file.exists(dirpath)) {
+  if(getfile <- file.exists(dirpath)) {
+    getfile <- as.numeric(as.POSIXct(file.info(dirpath)$mtime) - 
+                            as.POSIXct(Sys.Date())) < 24
+  }
+  if(!getfile) {
     dirpath <- "https://coronadatascraper.com/timeseries.csv"
+    if(interactive()) {
+      out <- read.csv(dirpath, stringsAsFactors = FALSE)
+      dirpath <- "data/timeseries.csv"
+      write.csv(out, dirpath, row.names = FALSE)
+    } else {
+    }
   }
   # Probably need to rethink this, as there are records for whole country,
   # whole state and county, and they may not add up.
@@ -100,11 +110,12 @@ real_cases_cds <- function() {
       Population = population,
       Count = value
     ) %>% 
-    mutate(Type = case_when(
-      Type == "cases" ~ "Confirmed",
-      Type == "deaths" ~ "Death",
-      Type == "recovered" ~ "Recovered",
-      TRUE ~ NA_character_
+    mutate(Count = as.numeric(Count),
+      Type = case_when(
+        Type == "cases" ~ "Confirmed",
+        Type == "deaths" ~ "Death",
+        Type == "recovered" ~ "Recovered",
+        TRUE ~ NA_character_
     )) %>%
     as_tibble() %>%
     # Fix USA state names.
@@ -179,8 +190,7 @@ real_cases_country_jhu <- function(cases_state) {
 }
 
 # JHU Data. Only has State for a few countries.
-cases_county <- real_cases_jhu()
-cases_state <- real_cases_state_jhu(cases_county)
+cases_state <- real_cases_state_jhu(real_cases_jhu())
 cases <- real_cases_country_jhu(cases_state) %>%
   mutate(Continent = 
            countrycode(Country,
@@ -239,7 +249,7 @@ cases_continent <- cases_region %>%
 # Coronadatascraper Data. Using this for State and County
 # Need to sort out County, State and Country better
 
-cases_country_cds <- real_cases_cds() %>%
+cases_state <- real_cases_cds() %>%
   mutate(Continent = 
            countrycode(Country,
                        origin = "country.name",
@@ -250,15 +260,12 @@ cases_country_cds <- real_cases_cds() %>%
                        origin = "country.name",
                        destination = "region",
                        warn = FALSE))
-cases_county_cds <- real_cases_county_cds(cases_country_cds)
-cases_state_cds <- real_cases_state_cds(cases_country_cds)
-cases_country_cds <- real_cases_country_cds(cases_country_cds)
+# For now, use CDS for state and county
+cases_county <- real_cases_county_cds(cases_state)
+cases_state <- real_cases_state_cds(cases_state)
 
 counties <- sort(unique(cases_county$County))
 countries <- sort(unique(cases$Country))
-# For now, use CDS for state and county
-cases_state <- cases_state_cds
-cases_county <- cases_county_cds
 
 countries_state <- sort(unique(cases_state$Country))
 countries_county <- sort(unique(cases_county$Country))
@@ -338,7 +345,7 @@ ui <- fluidPage(
           selectInput("casetypes", "Case Type:", c("Confirmed","Death","Recovered")),
           selectInput("realscale", "Plot Scale:", c("raw","geometric","new_cases")),
           checkboxInput("predict", "Add predict lines?", FALSE),
-          checkboxInput("rate", "Count per 100,000?", FALSE),
+          checkboxInput("rate", "Rate per 100,000?", FALSE),
           conditionalPanel(
             condition = 'input.states != "Continents"',
             uiOutput("showallui")
@@ -364,16 +371,21 @@ ui <- fluidPage(
     ),
     tabPanel("Testing",
       plotOutput("testplot"),
-      radioButtons("testgroup", "", c("States","USA"), inline = TRUE),
-      conditionalPanel(
-        condition = 'input.testgroup == "States"',
-        selectInput("teststate", "State:", 
-                    state.abb,
-                    c("WI","MI","IL","IA"),
-                    multiple = TRUE)
-      ),
-      selectInput("testscale", "Plot Scale:", c("raw","geometric")),
-      textOutput("testinfo")
+      fluidRow(
+        column(3,
+               radioButtons("testgroup", "", c("States","USA"), inline = TRUE),
+               conditionalPanel(
+                 condition = 'input.testgroup == "States"',
+                 selectInput("teststate", "State:", 
+                             state.abb,
+                             c("WI","MI","IL","IA"),
+                             multiple = TRUE)
+               ),
+               selectInput("testscale", "Plot Scale:", c("raw","geometric")),
+               textOutput("testinfo")),
+        column(9,
+               tableOutput("testlast"))
+      )
     ),
     tabPanel("Simulations",
              sidebarLayout(
@@ -500,10 +512,10 @@ server <- function(input, output) {
                         input$hospitalizing,
                         input$bedmax)
 
-    p <- ggplot(dat) +
+    p <- suppressWarnings(ggplot(dat) +
       aes(dates, Count / 1000, group = Cases, col = Cases) +
       geom_line(size = 2) +
-      ggtitle("Thousands of Cases")
+      ggtitle("Thousands of Cases"))
     
     if(input$scale == "geometric") {
       p <- p +
@@ -602,7 +614,7 @@ server <- function(input, output) {
     
     if(isTruthy(input$rate)) {
       p <- p + 
-        ylab("Count per 100,000")
+        ylab("Rate per 100,000")
     }
     
     if(isTruthy(input$recent)) {
@@ -666,20 +678,20 @@ server <- function(input, output) {
       if(input$states == "States") {
         p <- suppressWarnings(p + 
           geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
-                      formula = round(y) ~ x,
+                      formula = as.integer(round(y)) ~ x,
                       method.args = list(family = "poisson"),
                       linetype = "dashed"))
       } else {
         p <- suppressWarnings(p + 
           geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
-                      formula = round(y) ~ x,
+                      formula = as.integer(round(y)) ~ x,
                       method.args = list(family = "poisson"),
                       linetype = "dashed"))
       }
     }
     if(input$realscale == "geometric") {
-      p <- p +
-        scale_y_log10()
+      p <- suppressWarnings(p +
+        scale_y_log10())
     }
     suppressWarnings(p)
   })
@@ -799,9 +811,7 @@ server <- function(input, output) {
         unique((
           cases_state %>% 
             filter(Country %in% countries_reactive()))$State))
-    if(isTruthy(input$state)) {
-      selected <- input$state
-    } else {
+    if(!isTruthy(selected <- input$state)) {
       selected <- c("WI","MI","IL","IA")
     }
     states_country <- sort(unique(c(selected, states_country)))
@@ -820,9 +830,12 @@ server <- function(input, output) {
           cases_county %>% 
             filter(Country %in% countries_reactive(),
                    State %in% input$state))$County))
+    if(!isTruthy(selected <- input$county)) {
+      selected <- c("Dane","Milwaukee", "Waukesha", "Brown", "Racine", "Walworth", "Kenosha")
+    }
     selectInput("county", "Counties:", 
                 counties_states,
-                c("Dane","Milwaukee", "Waukesha", "Brown", "Racine", "Walworth", "Kenosha"),
+                selected,
                 multiple = TRUE)
   })
   
@@ -867,7 +880,7 @@ server <- function(input, output) {
             form <- formula(Count ~ Date * Country)
           })
       }
-      fit <- glm(form, cases_reactive(),
+      fit <- glm(form, cases_reactive() %>% mutate(Count = as.integer(round(Count))),
           weight = Weight, family = "poisson")
       coefs <- coef(fit)
       coefs <- coefs[str_detect(names(coefs), "Date")]
@@ -875,7 +888,7 @@ server <- function(input, output) {
       names(coefs) <- units_reactive()
     } else {
       form <- formula(Count ~ Date)
-      fit <- glm(form, cases_reactive(),
+      fit <- glm(form, cases_reactive() %>% mutate(Count = as.integer(round(Count))),
                  weight = Weight, family = "poisson")
       coefs <- coef(fit)
       coefs <- coefs[str_detect(names(coefs), "Date")]
@@ -891,60 +904,45 @@ server <- function(input, output) {
     }
     
     # Get data from last date.
-    switch(input$states,
+    out <- switch(input$states,
     States = {
       dat %>% 
         group_by(Type, State) %>%
         summarize(Count = max(Count, na.rm = TRUE)) %>%
         ungroup %>%
-        select(Type, State, Count) %>%
-        mutate(Count = as.integer(Count)) %>%
-        pivot_wider(names_from = Type, values_from = Count) %>%
-        mutate(Doubling = doubling) %>%
-        arrange(desc(Confirmed))
+        select(Type, State, Count)
     },
     Countries = {
       dat %>% 
         group_by(Type, Country) %>%
         summarize(Count = max(Count, na.rm = TRUE)) %>%
         ungroup %>%
-        select(Type, Country, Count) %>%
-        mutate(Count = as.integer(Count)) %>%
-        pivot_wider(names_from = Type, values_from = Count) %>%
-        mutate(Doubling = doubling) %>%
-        arrange(desc(Confirmed))
+        select(Type, Country, Count)
     },
     Counties = {
       dat %>% 
-        group_by(Type, County) %>% 
+        group_by(Type, State, County) %>% 
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
-        ungroup %>% 
-        mutate(Count = as.integer(Count)) %>% 
-        pivot_wider(names_from = Type, values_from = Count) %>% 
-        mutate(Doubling = doubling) %>%
-        arrange(desc(Confirmed))
+        ungroup
     },
     Regions = {
       dat %>% 
         group_by(Type, Region) %>% 
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
-        ungroup %>% 
-        mutate(Count = as.integer(Count)) %>% 
-        pivot_wider(names_from = Type, values_from = Count) %>% 
-        mutate(Doubling = doubling) %>%
-        arrange(desc(Confirmed))
+        ungroup
     },
     Continents = {
       dat %>% 
         # filter(Type == input$casetypes)
         group_by(Type, Continent) %>% 
         summarize(Count = max(Count, na.rm = TRUE)) %>% 
-        ungroup %>% 
-        mutate(Count = as.integer(Count)) %>% 
-        pivot_wider(names_from = Type, values_from = Count) %>% 
-        mutate(Doubling = doubling) %>%
-        arrange(desc(Confirmed))
+        ungroup
     })
+    out %>%
+      mutate(Count = suppressWarnings(as.integer(round(Count)))) %>%
+      pivot_wider(names_from = Type, values_from = Count) %>%
+      mutate(Doubling = doubling) %>%
+      arrange(desc(Confirmed))
   })
   
   # Show table of top cases
@@ -958,7 +956,7 @@ server <- function(input, output) {
     }
 
     # Get data fro last date.
-    switch(input$states,
+    out <- switch(input$states,
            States = {
              dat %>% 
                filter(!(State %in% units_reactive())) %>%
@@ -966,11 +964,7 @@ server <- function(input, output) {
                summarize(Count = max(Count, na.rm = TRUE)) %>%
                ungroup %>%
                arrange(desc(Count)) %>%
-               select(Type, State, Count) %>%
-               mutate(Count = as.integer(Count)) %>%
-               pivot_wider(names_from = Type, values_from = Count) %>%
-               top_n(topnum, Confirmed) %>%
-               arrange(desc(Confirmed))
+               select(Type, State, Count)
            },
            Regions = {
              dat %>% 
@@ -978,11 +972,7 @@ server <- function(input, output) {
                group_by(Type, Region) %>%
                summarize(Count = max(Count, na.rm = TRUE)) %>%
                ungroup %>%
-               select(Type, Region, Count) %>%
-               mutate(Count = as.integer(Count)) %>%
-               pivot_wider(names_from = Type, values_from = Count) %>%
-               top_n(topnum, Confirmed) %>%
-               arrange(desc(Confirmed))
+               select(Type, Region, Count)
            },
            Countries = {
              dat %>% 
@@ -990,28 +980,46 @@ server <- function(input, output) {
                group_by(Type, Country) %>%
                summarize(Count = max(Count, na.rm = TRUE)) %>%
                ungroup %>%
-               select(Type, Country, Count) %>%
-               mutate(Count = as.integer(Count)) %>%
-               pivot_wider(names_from = Type, values_from = Count) %>%
-               top_n(topnum, Confirmed) %>%
-               arrange(desc(Confirmed))
+               select(Type, Country, Count)
            },
            Counties = {
              dat %>% 
                filter(!(County %in% units_reactive())) %>%
-               group_by(Type, County) %>% 
+               group_by(Type, State, County) %>% 
                summarize(Count = max(Count, na.rm = TRUE)) %>% 
-               ungroup %>% 
-               mutate(Count = as.integer(Count)) %>% 
-               pivot_wider(names_from = Type, values_from = Count) %>%
-               top_n(topnum, Confirmed) %>%
-               arrange(desc(Confirmed))
+               ungroup
            })
+    out %>%
+      mutate(Count = suppressWarnings(as.integer(round(Count)))) %>%
+      pivot_wider(names_from = Type, values_from = Count) %>%
+      top_n(topnum, Confirmed) %>%
+      arrange(desc(Confirmed))
   })
   output$topcasestxt <- renderUI({
-    tagList("Other top", input$states, "confirmed:")
+    tagList("Other top", input$states, ":")
   })
 
+  output$testlast <- renderTable({
+    req(input$teststate)
+    switch(
+      req(input$testgroup),
+      States = {
+        test_st %>%
+          filter(state %in% input$teststate,
+                 date == max(date)) %>%
+          mutate(count = suppressWarnings(as.integer(count))) %>%
+          pivot_wider(names_from = status, values_from = count) %>%
+          select(-date)
+      },
+      USA = {
+        test_us %>%
+          filter(date == max(date)) %>%
+          mutate(count = suppressWarnings(as.integer(count))) %>%
+          pivot_wider(names_from = status, values_from = count) %>%
+          select(-date)
+        
+      })
+  })
   output$testplot <- renderPlot({
     req(input$teststate)
     switch(
@@ -1026,8 +1034,8 @@ server <- function(input, output) {
           p <- ggplot(test_us) +
             aes(date, count, col = status)
         })
-    p <- p +
-      geom_line(size = 2)
+    p <- suppressWarnings(p +
+      geom_line(size = 2))
     if(input$testscale == "geometric") {
       p <- p +
         scale_y_log10()
