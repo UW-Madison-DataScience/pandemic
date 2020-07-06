@@ -10,6 +10,14 @@ suppressMessages({
   library(countrycode)
 })
 
+max_na <- function(Count) {
+  if(all(is.na(Count))) {
+    NA
+  } else {
+    max(Count, na.rm = TRUE)
+  }
+}
+
 double_cases <- function(Confirmed0, doubling, actual, hidden, hospitalizing,
                          bedmax) {
   case0 <- Confirmed0 * hidden
@@ -51,6 +59,7 @@ real_cases_jhu <- function() {
            State = ifelse(State %in% state.name, 
                           state.abb[match(State, state.name)], 
                           State),
+           County = paste0(County, ", ", State),
            Country = ifelse(Country == "US", "USA", Country),
            Country = ifelse(str_detect(Country, "Taiwan"), "Taiwan", Country)) %>%
     group_by(Type, County, State, Country, Date) %>%
@@ -64,8 +73,25 @@ real_cases_jhu <- function() {
     weight_date()
 }
 
+read_local <- function(filename, dirpath) {
+  filepath <- file.path(dirpath, filename)
+  if(interactive()) {
+    localpath <- file.path("data", filename)
+    if(getfile <- file.exists(localpath)) {
+      # Is file recent?
+      getfile <- abs(as.numeric(as.POSIXct(Sys.Date()) -
+                                  as.POSIXct(file.info(localpath)$mtime))) < 24
+    }
+    if(!getfile) {
+      out <- read.csv(filepath, stringsAsFactors = FALSE)
+      write.csv(out, localpath, row.names = FALSE)
+    }
+    filepath <- localpath
+  }
+  filepath  
+}
 real_cases_cds <- function() {
-  # data downloaded from "https://coronadatascraper.com/timeseries-tidy.csv"
+  # data downloaded from "https://listaging-reportsbucket-1bjqfmfwopcdd.s3-us-west-1.amazonaws.com/beta/latest/timeseries-tidy.csv"
   # takes too long in the shiny app to download the data each time (34 seconds).  Need to 
   #  manually update the file in the application for this one to work
   #
@@ -73,25 +99,14 @@ real_cases_cds <- function() {
   # and update of tidy version seems to have broken down.
   # See added line below to "tidy up"
   
-  dirpath <- "data/timeseries.csv"
-  if(getfile <- file.exists(dirpath)) {
-    getfile <- as.numeric(as.POSIXct(file.info(dirpath)$mtime) - 
-                            as.POSIXct(Sys.Date())) < 24
-  }
-  if(!getfile) {
-    dirpath <- "https://coronadatascraper.com/timeseries.csv"
-    if(interactive()) {
-      out <- read.csv(dirpath, stringsAsFactors = FALSE)
-      dirpath <- "data/timeseries.csv"
-      write.csv(out, dirpath, row.names = FALSE)
-    } else {
-    }
-  }
+  filepath <- read_local("timeseries.csv", 
+#                         dirpath "https://coronadatascraper.com")
+                         dirpath <- "https://listaging-reportsbucket-1bjqfmfwopcdd.s3-us-west-1.amazonaws.com/beta/latest")
   # Probably need to rethink this, as there are records for whole country,
   # whole state and county, and they may not add up.
   # Also population is separate for each of these.
-  read.csv(dirpath, stringsAsFactors = FALSE) %>%
-    filter(city == "") %>% # remove any city level data
+  read.csv(filepath, stringsAsFactors = FALSE) %>%
+#    filter(city == "") %>% # remove any city level data
     
     mutate(country = ifelse(country == "United States", "USA", country),
            country = ifelse(country == "iso1:US", "USA", country),
@@ -132,7 +147,8 @@ real_cases_county_cds <- function(cases_cds) {
            level == "county") %>%
     filter(!str_detect(County, "^,"),
            !str_detect(County, "unassign")) %>%
-    mutate(County = str_remove(County, " County")) %>%
+    mutate(County = str_remove(County, " County"),
+           County = paste0(County, ", ", State)) %>%
 #    mutate(County = paste0(County, ", ", State),
 #           County = ifelse(State %in% state.abb, 
 #                           str_replace(County, 
@@ -189,6 +205,33 @@ real_cases_country_jhu <- function(cases_state) {
     ungroup
 }
 
+dis_region <- function(cases) {
+  cases %>%
+    mutate(
+      Region = ifelse(is.na(Region) & Continent == "Africa",
+                      "Saharan Africa", Region),
+      Region = ifelse(is.na(Continent),
+                      "Europe Middle East", Region),
+      Continent = ifelse(is.na(Continent),
+                         "Europe", Continent),
+      Region = ifelse(Continent == "Americas" & Region == "Europe & Central Asia",
+                      "Europe", Region),
+      Region = ifelse(Continent == "Europe" & Region == "Europe & Central Asia",
+                      "Europe", Region),
+      Region = ifelse(Continent == "Asia" & Region == "Europe & Central Asia",
+                      "Central Asia", Region),
+      Region = ifelse(Continent == "Africa" & Region == "Middle East & North Africa",
+                      "North Africa", Region),
+      Region = ifelse(Continent == "Europe" & Region == "Middle East & North Africa",
+                      "Europe Middle East", Region),
+      Region = ifelse(Continent == "Asia" & Region == "Middle East & North Africa",
+                      "Asia Middle East", Region),
+      Region = ifelse(Continent == "Oceania" & Region == "East Asia & Pacific",
+                      "Pacific", Region),
+      Region = ifelse(Continent == "Asia" & Region == "East Asia & Pacific",
+                      "East Asia", Region))
+}
+
 # JHU Data. Only has State for a few countries.
 cases_state <- real_cases_state_jhu(real_cases_jhu())
 cases <- real_cases_country_jhu(cases_state) %>%
@@ -202,6 +245,8 @@ cases <- real_cases_country_jhu(cases_state) %>%
                        origin = "country.name",
                        destination = "region",
                        warn = FALSE))
+cases <- dis_region(cases)
+
 # 5 continents
 # 20 regions if used as destination
 continents <- distinct(cases, Continent, Region, Country) %>%
@@ -227,9 +272,6 @@ continents <- continents %>%
          Population = ifelse(Country.Code == "ERI", 3.214 * 1e6, Population),
          Population = ifelse(Country.Code == "ESH", 500000, Population))
 
-continent_names <- sort(unique(continents$Continent))
-region_names <- sort(unique(continents$Region))
-
 cases <- cases %>%
   mutate(Population = continents$Population[match(Country, continents$Country)])
 cases_region <- cases %>%
@@ -246,7 +288,7 @@ cases_continent <- cases_region %>%
   ungroup  
 
 
-# Coronadatascraper Data. Using this for State and County
+# CovidAtlas Data. Using this for State and County
 # Need to sort out County, State and Country better
 
 cases_state <- real_cases_cds() %>%
@@ -260,6 +302,7 @@ cases_state <- real_cases_cds() %>%
                        origin = "country.name",
                        destination = "region",
                        warn = FALSE))
+cases_state <- dis_region(cases_state)
 # For now, use CDS for state and county
 cases_county <- real_cases_county_cds(cases_state)
 cases_state <- real_cases_state_cds(cases_state)
@@ -270,9 +313,14 @@ countries <- sort(unique(cases$Country))
 countries_state <- sort(unique(cases_state$Country))
 countries_county <- sort(unique(cases_county$Country))
 
+continent_names <- sort(unique(cases_state$Continent))
+region_names <- sort(unique(cases_state$Region))
+
 # Testing in USA
-read_testing <- function(filename, by_state = FALSE) {
-  out <- read_csv(filename, col_types = cols()) %>%
+read_testing <- function(filename, by_state = FALSE,
+                         dirpath = "https://covidtracking.com/api") {
+  filepath <- read_local(filename, dirpath)
+  out <- read_csv(filepath, col_types = cols()) %>%
     mutate(date = as.Date(as.character(date), "%Y%m%d"))
   if(by_state) {
     out <- out %>%
@@ -285,8 +333,8 @@ read_testing <- function(filename, by_state = FALSE) {
     pivot_longer(positive:total, names_to = "status", values_to = "count") %>%
     filter(status != "death")
 }
-test_us <- read_testing("https://covidtracking.com/api/us/daily.csv")
-test_st <- read_testing("http://covidtracking.com/api/states/daily.csv", TRUE)
+test_us <- read_testing("us/daily.csv")
+test_st <- read_testing("states/daily.csv", TRUE)
 
 revlog <- scales::trans_new("revlog",
                             function(x) -log10(x),
@@ -719,19 +767,20 @@ server <- function(input, output) {
       })
   }) 
   allcases_reactive <- reactive({
+    units <- req(units_reactive())
     switch(
       req(input$states),
       Counties = {
         cases_county %>%
           filter(State %in% input$state) %>%
-          mutate(colgp = ifelse(County %in% units_reactive(),
+          mutate(colgp = ifelse(County %in% units,
                                 County,
                                 ""))
       },
       States = {
         cases_state %>% 
           filter(Country %in% countries_reactive()) %>%
-          mutate(colgp = ifelse(State %in% units_reactive(),
+          mutate(colgp = ifelse(State %in% units,
                                 State,
                                 ""))
       },
@@ -741,7 +790,7 @@ server <- function(input, output) {
       },
       Regions = {
         cases_region %>%
-          mutate(colgp = ifelse(Region %in% units_reactive(),
+          mutate(colgp = ifelse(Region %in% units,
                                 Region,
                                 ""))
       },
@@ -752,25 +801,26 @@ server <- function(input, output) {
         }
         cases %>%
           filter(Continent %in% continents_in) %>%
-          mutate(colgp = ifelse(Country %in% units_reactive(),
+          mutate(colgp = ifelse(Country %in% units,
                                 Country,
                                 ""))
       })
   })
   
   cases_reactive <- reactive({
+    units <- req(units_reactive())
     switch(
       req(input$states),
       Counties = {
         cases_county %>% 
-          filter(County %in% units_reactive(),
+          filter(County %in% units,
                  State %in% input$state) %>%
           mutate(colgp = County)
       },
       States = {
         cases_state %>% 
           filter(Country %in% countries_reactive(), 
-                 State %in% units_reactive()) %>%
+                 State %in% units) %>%
           mutate(colgp = State)
       },
       Continents = {
@@ -779,12 +829,12 @@ server <- function(input, output) {
       },
       Regions = {
         cases_region %>% 
-          filter(Region %in% units_reactive()) %>%
+          filter(Region %in% units) %>%
           mutate(colgp = Region)
       },
       Countries = {
         cases %>% 
-          filter(Country %in% units_reactive()) %>%
+          filter(Country %in% units) %>%
           mutate(colgp = Country)
       })
   })
@@ -831,7 +881,8 @@ server <- function(input, output) {
             filter(Country %in% countries_reactive(),
                    State %in% input$state))$County))
     if(!isTruthy(selected <- input$county)) {
-      selected <- c("Dane","Milwaukee", "Waukesha", "Brown", "Racine", "Walworth", "Kenosha")
+      selected <- c("Dane, WI","Milwaukee, WI", "Waukesha, WI", "Brown, WI", "Racine, WI",
+                    "Walworth, WI", "Kenosha, WI")
     }
     selectInput("county", "Counties:", 
                 counties_states,
@@ -908,34 +959,34 @@ server <- function(input, output) {
     States = {
       dat %>% 
         group_by(Type, State) %>%
-        summarize(Count = max(Count, na.rm = TRUE)) %>%
+        summarize(Count = max_na(Count)) %>%
         ungroup %>%
         select(Type, State, Count)
     },
     Countries = {
       dat %>% 
         group_by(Type, Country) %>%
-        summarize(Count = max(Count, na.rm = TRUE)) %>%
+        summarize(Count = max_na(Count)) %>%
         ungroup %>%
         select(Type, Country, Count)
     },
     Counties = {
       dat %>% 
         group_by(Type, State, County) %>% 
-        summarize(Count = max(Count, na.rm = TRUE)) %>% 
+        summarize(Count = max_na(Count)) %>% 
         ungroup
     },
     Regions = {
       dat %>% 
         group_by(Type, Region) %>% 
-        summarize(Count = max(Count, na.rm = TRUE)) %>% 
+        summarize(Count = max_na(Count)) %>% 
         ungroup
     },
     Continents = {
       dat %>% 
         # filter(Type == input$casetypes)
         group_by(Type, Continent) %>% 
-        summarize(Count = max(Count, na.rm = TRUE)) %>% 
+        summarize(Count = max_na(Count)) %>% 
         ungroup
     })
     out %>%
@@ -947,6 +998,7 @@ server <- function(input, output) {
   
   # Show table of top cases
   output$topcases <- renderTable({
+    units <- req(units_reactive())
     topnum <- 5
     
     dat <- allcases_reactive()
@@ -959,34 +1011,34 @@ server <- function(input, output) {
     out <- switch(input$states,
            States = {
              dat %>% 
-               filter(!(State %in% units_reactive())) %>%
+               filter(!(State %in% units)) %>%
                group_by(Type, State) %>%
-               summarize(Count = max(Count, na.rm = TRUE)) %>%
+               summarize(Count = max_na(Count)) %>%
                ungroup %>%
                arrange(desc(Count)) %>%
                select(Type, State, Count)
            },
            Regions = {
              dat %>% 
-               filter(!(Region %in% units_reactive())) %>%
+               filter(!(Region %in% units)) %>%
                group_by(Type, Region) %>%
-               summarize(Count = max(Count, na.rm = TRUE)) %>%
+               summarize(Count = max_na(Count)) %>%
                ungroup %>%
                select(Type, Region, Count)
            },
            Countries = {
              dat %>% 
-               filter(!(Country %in% units_reactive())) %>%
+               filter(!(Country %in% units)) %>%
                group_by(Type, Country) %>%
-               summarize(Count = max(Count, na.rm = TRUE)) %>%
+               summarize(Count = max_na(Count)) %>%
                ungroup %>%
                select(Type, Country, Count)
            },
            Counties = {
              dat %>% 
-               filter(!(County %in% units_reactive())) %>%
+               filter(!(County %in% units)) %>%
                group_by(Type, State, County) %>% 
-               summarize(Count = max(Count, na.rm = TRUE)) %>% 
+               summarize(Count = max_na(Count)) %>% 
                ungroup
            })
     out %>%
@@ -1058,9 +1110,9 @@ server <- function(input, output) {
   output$jhusource <- renderUI({
     tagList("JHU CSSE Data URL:", sourcejhu)
   })
-  sourcecds <- a("https://coronadatascraper.com/", href = "https://coronadatascraper.com/#home")
+  sourcecds <- a("https://covidatlas.com/", href = "https://covidatlas.com/")
   output$cdsdata <- renderUI({
-    tagList("Reported cases (State and County level) come from Corona Data Scraper:", sourcecds)
+    tagList("Reported cases (State and County level) come from Covid Atlas:", sourcecds)
   })
   output$testinfo <- renderText(
     "Test data compiled by COVID Testing Project."

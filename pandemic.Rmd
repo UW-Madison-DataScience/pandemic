@@ -1,0 +1,293 @@
+---
+title: "pandemic"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+- [Coronavirus: Why You Must Act Now (2020) Tomas Pueyo](https://medium.com/@tomaspueyo/coronavirus-act-today-or-people-will-die-f4d3d9cd99ca)
+- [CSSE JHU COVID-19 Time series](https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series)
+
+```{r message=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(readr)
+library(RCurl)
+```
+
+```{r}
+dirpath <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series"
+cases_state <- bind_rows(
+  confirm = read_csv(
+    getURL(file.path(dirpath, "time_series_19-covid-Confirmed.csv"))),
+  dead = read_csv(
+    getURL(file.path(dirpath, "time_series_19-covid-Deaths.csv"))),
+  recover = read_csv(
+    getURL(file.path(dirpath, "time_series_19-covid-Recovered.csv"))),
+  .id = "Type") %>%
+  rename(State = "Province/State",
+         Region = "Country/Region") %>%
+  pivot_longer(-(Type:Long), names_to = "Date", values_to = "Count") %>%
+  mutate(Date = as.POSIXct(Date, format="%m/%d/%y")) %>%
+  mutate(State = ifelse(str_detect(State, ","), str_remove(State, "^.*, "), State),
+         State = ifelse(State %in% state.name, 
+                        state.abb[match(State, state.name)], 
+                        State)) %>%
+  group_by(Type, State, Region, Date) %>%
+  summarize(Count = sum(Count)) %>%
+  ungroup
+  
+cases <- cases_state %>%
+  group_by(Type, Region, Date) %>%
+  summarize(Count = sum(Count)) %>%
+  ungroup
+```
+
+### Confirmed Cases
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "confirm", Count > 0, Region == "China")) +
+  aes(Date, Count) +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("China confirmed cases")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "confirm", Count > 0, Region == "China")) +
+  aes(Date, Count) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("China confirmed cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "confirm", Count > 0)) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("All Countries confirmed cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "confirm", Count > 0, Region != "China")) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("All Countries but China confirmed cases")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "confirm", Count > 0, Region == "US")) +
+  aes(Date, Count) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("US confirmed cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "confirm", Count > 0, 
+                Region %in% c("Italy","Iran","Korea, South"))) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  ggtitle("Italy, Iran, South Korea confirmed cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "confirm", Count > 0, 
+                !(Region %in% c("US", "China", "Italy","Iran","Korea, South")))) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("All but China, US, Italy, Iran, South Korea confirmed cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases_state %>% 
+         filter(Type == "confirm", Count > 0, 
+                Region == "US")) +
+  aes(Date, Count, col = State) +
+  geom_line() +
+  scale_y_log10() +
+#  theme(legend.position = "none") +
+  ggtitle("US states confirmed cases (geometric scale)")
+```
+
+### Deaths
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "dead", Count > 0, Region == "China")) +
+  aes(Date, Count) +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("China deaths")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "dead", Count > 0, Region == "China")) +
+  aes(Date, Count) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("China deaths (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "dead", Count > 0)) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  ggtitle("All Countries deaths (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "dead", Count > 0, Region != "China")) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  ggtitle("All Countries but China deaths")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "dead", Count > 0, Region == "US")) +
+  aes(Date, Count) +
+  geom_line() +
+  scale_y_log10() +
+  ggtitle("US deaths (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "dead", Count > 0, 
+                Region %in% c("Italy","Iran","Korea, South"))) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  ggtitle("Italy, Iran, South Korea deaths (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "dead", Count > 0, 
+                !(Region %in% c("US", "China", "Italy","Iran","Korea, South")))) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  ggtitle("All but China, US, Italy, Iran, South Korea deaths (geometric scale)")
+```
+
+```{r}
+ggplot(cases_state %>% 
+         filter(Type == "dead", Count > 0, 
+                Region == "US")) +
+  aes(Date, Count, col = State) +
+  geom_line() +
+  scale_y_log10() +
+#  theme(legend.position = "none") +
+  ggtitle("US states deaths (geometric scale)")
+```
+
+### Recovered cases
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "recover", Count > 0, Region == "China")) +
+  aes(Date, Count) +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("China recovered cases")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "recover", Count > 0, Region == "China")) +
+  aes(Date, Count) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("China recovered cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "recover", Count > 0)) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("All Countries recovered cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "recover", Count > 0, Region != "China")) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("All Countries but China recovered cases")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "recover", Count > 0, Region == "US")) +
+  aes(Date, Count) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("US recovered cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "recover", Count > 0, 
+                Region %in% c("Italy","Iran","Korea, South"))) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  ggtitle("Italy, Iran, South Korea recovered cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases %>% 
+         filter(Type == "recover", Count > 0, 
+                !(Region %in% c("US", "China", "Italy","Iran","Korea, South")))) +
+  aes(Date, Count, col = Region) +
+  geom_line() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ggtitle("All but China, US, Italy, Iran, South Korea recovered cases (geometric scale)")
+```
+
+```{r}
+ggplot(cases_state %>% 
+         filter(Type == "recover", Count > 0, 
+                Region == "US")) +
+  aes(Date, Count, col = State) +
+  geom_line() +
+  scale_y_log10() +
+#  theme(legend.position = "none") +
+  ggtitle("US states recovered cases (geometric scale)")
+```
+ 
+
+

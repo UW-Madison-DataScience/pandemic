@@ -12,3 +12,5 @@ R/
 *.csv
 *.zip
 rsconnect/shinyapps.io
+.DS_Store
+data/
