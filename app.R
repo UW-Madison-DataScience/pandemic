@@ -100,14 +100,15 @@ real_cases_cds <- function() {
   # See added line below to "tidy up"
   
   filepath <- read_local("timeseries.csv", 
-#                         dirpath "https://coronadatascraper.com")
-                         dirpath <- "https://listaging-reportsbucket-1bjqfmfwopcdd.s3-us-west-1.amazonaws.com/beta/latest")
+                         dirpath = "https://coronadatascraper.com")
+# Following is future data source. Still in transition.
+#                         dirpath = "https://listaging-reportsbucket-1bjqfmfwopcdd.s3-us-west-1.amazonaws.com/beta/latest")
   # Probably need to rethink this, as there are records for whole country,
   # whole state and county, and they may not add up.
   # Also population is separate for each of these.
   read.csv(filepath, stringsAsFactors = FALSE) %>%
 #    filter(city == "") %>% # remove any city level data
-    
+
     mutate(country = ifelse(country == "United States", "USA", country),
            country = ifelse(country == "iso1:US", "USA", country),
            country = ifelse(country == "Metropolitan France", "France", country)) %>%
