@@ -175,19 +175,23 @@ real_cases_country_cds <- function(cases_cds) {
     select(-level, -County, -State)
 }
 
-weight_date <- function(cases_state) {
+weight_date <- function(cases_state, skew = 0, days = 14) {
+  
   # Add weights skewed toward most recent dates.
-  skew <- 20
+  # skew <- 20
   sweight <- as.numeric(unique(cases_state$Date))
-  mweight <- min(sweight)
-  eweight <- as.numeric(sweight - mweight)
+  if(days > 0) {
+    pos <- (max(sweight) - sweight) < days * 86400
+  }
+  mweight <- min(sweight[pos])
+  eweight <- pmax(0, as.numeric(sweight - mweight))
   sweight <- max(eweight)
   eweight <- max(exp(skew * eweight / sweight))
   
   # Add weights to states
   cases_state %>%
-    mutate(Weight = as.numeric(Date - mweight) / sweight) %>%
-    mutate(Weight = exp(skew * Weight) / eweight)
+    mutate(Weight = pmax(0, as.numeric(Date - mweight) / sweight)) %>%
+    mutate(Weight = (Weight > 0) * exp(skew * Weight) / eweight)
 }
 
 real_cases_state_jhu <- function(cases_state) {
@@ -609,8 +613,8 @@ server <- function(input, output) {
     if(req(input$realscale) == "new_cases") {
       tmpfn <- function(Count) {
         dc <- diff(Count)
-        c(rep(first(dc), 2), 
-          roll_mean(c(first(Count), dc), 3))
+        c(rep(first(dc), 6), 
+          roll_mean(c(first(Count), dc), 7))
       }
       switch(input$states,
       States = {
@@ -719,29 +723,31 @@ server <- function(input, output) {
         theme(legend.position = "none")
     }
 
-    if(isTruthy(input$predict)) {
-      # Set vertical range by data.
-      p <- p +
-        ylim(min(dat$Count), max(dat$Count))
-      
-      if(input$states == "States") {
-        p <- suppressWarnings(p + 
-          geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
-                      formula = as.integer(round(y)) ~ x,
-                      method.args = list(family = "poisson"),
-                      linetype = "dashed"))
-      } else {
-        p <- suppressWarnings(p + 
-          geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
-                      formula = as.integer(round(y)) ~ x,
-                      method.args = list(family = "poisson"),
-                      linetype = "dashed"))
-      }
-    }
     if(input$realscale == "geometric") {
       p <- suppressWarnings(p +
-        scale_y_log10())
+                              scale_y_log10())
+    } else {
+      if(isTruthy(input$predict)) {
+        # Set vertical range by data.
+        p <- p +
+          ylim(min(dat$Count), max(dat$Count))
+        
+        if(input$states == "States") {
+          p <- suppressWarnings(p + 
+                                  geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
+                                              formula = as.integer(round(y)) ~ x,
+                                              method.args = list(family = "poisson"),
+                                              linetype = "dashed"))
+        } else {
+          p <- suppressWarnings(p + 
+                                  geom_smooth(method="glm", mapping = aes(weight = Weight), se = FALSE,
+                                              formula = as.integer(round(y)) ~ x,
+                                              method.args = list(family = "poisson"),
+                                              linetype = "dashed"))
+        }
+      }
     }
+    
     suppressWarnings(p)
   })
   
@@ -1135,7 +1141,7 @@ server <- function(input, output) {
   output$onep3 <- renderUI({
     tagList("See", pointacres, "for additional county updates.")
   })
-  output$newcases <- renderText("New cases are averages of last 3-days.")
+  output$newcases <- renderText("New cases are averages of last 7 days.")
   
   # U Penn Medicine
   pennmed <- a("penn-chime.phl.io/", 
@@ -1181,8 +1187,7 @@ server <- function(input, output) {
     Does our community have enough hospital beds?'})
   output$summary2 <- renderText({
     '"Reported Cases" tab draws on Johns Hopkins U CSSE, which many apps are using.
-    Doubling time (days) is estimated via Poisson regression with exponential weights
-    (heavier weight on recent dates)
+    Doubling time (days) is estimated via Poisson regression for previous 14 days
     using ONLY confirmed cases.
     Dashed Poisson regression lines added if you click the “Add predict lines?” box.'})
   output$summary3 <- renderText({
