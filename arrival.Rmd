@@ -1,0 +1,135 @@
+---
+title: "Arrival"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+### Dormitory arrival
+
+```{r}
+arrive <- read_excel("data/Fall 2020 Housing State County Country.xlsx") %>%
+  mutate(HOME_ADDRESS_STATE = ifelse(HOME_COUNTRY_CODE != "USA", "international", HOME_ADDRESS_STATE),
+         HOME_ADDRESS_STATE = ifelse(HOME_ADDRESS_STATE == "AE", "international", HOME_ADDRESS_STATE)) %>%
+  count(HOME_ADDRESS_STATE) %>%
+  rename(state = "HOME_ADDRESS_STATE",
+         students = "n") %>%
+  arrange(state)
+#tmp <- grep("international", arrive$state)
+#arrive <- bind_rows(arrive[tmp,], arrive[-tmp,])
+```
+
+```{r}
+write_csv(arrive %>% select(state, students), "arrival_dorm.csv")
+```
+
+```{r}
+dorm_covid <- 
+  full_join(
+    read_excel("data/WI_Arrival_Dorm.xls") %>%
+      filter(state != "total"),
+    dorm_covid_prob <- read_excel("data/WI_Arrival_Dorm.xls", sheet = 2),
+    by = c("state", "num_students"),
+    suffix = c("_c","_p"))
+```
+
+```{r}
+ggplot(dorm_covid) +
+  aes(num_students, ihme_mean_rate_sept_c, size = ihme_mean_rate_sept_p) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+### All arrival
+
+```{r}
+all <- read_excel("data/pop_1204.xlsx") %>%
+  rename(state = "States",
+         students = "Total students") %>%
+  mutate(state = state.abb[match(state, state.name)])
+all <- bind_rows(all[,1:2],
+                 data.frame(state = "international", students = as.numeric(names(all)[5])))
+```
+
+```{r}
+write_csv(all, "arrival_all.csv")
+```
+
+### WI Historical Data
+
+```{r}
+wiDorm <- read_excel("data/Fall 2020 Housing State County Country.xlsx") %>%
+  rename(state = "HOME_ADDRESS_STATE",
+         county = "HOME_COUNTY_DESCR") %>%
+  mutate(state = ifelse(HOME_COUNTRY_CODE != "USA", "international", state),
+         state = ifelse(state == "AE", "international", state)) %>%
+  count(state, county) %>%
+  rename(students = "n") %>%
+  arrange(state, county) %>%
+  filter(state == "WI")
+#tmp <- grep("international", arrive$state)
+#arrive <- bind_rows(arrive[tmp,], arrive[-tmp,])
+```
+
+```{r}
+wiHistPosAge <- read_csv("data/COVID-19_Historical_Data_Table.csv") %>%
+  filter(GEO == "State") %>%
+  select(DATE, POS_0_9:POS_90) %>%
+  mutate(DATE = as.POSIXct(DATE)) %>%
+  pivot_longer(POS_0_9:POS_90, names_to = "age", values_to = "pos") %>%
+  filter(!is.na(pos)) %>%
+  mutate(age = str_remove(age, "POS_"))
+```
+
+```{r}
+ggplot(wiHistPosAge) +
+  aes(DATE, pos, col = age) +
+  geom_line()
+```
+
+```{r}
+# AGEGRP 0=total, 1:18 in 5-year intervals 
+ccest <- read_csv("data/cc-est2019-alldata-55.csv") %>%
+  filter(YEAR == 12) %>% # most recent year
+  select(CTYNAME, AGEGRP, TOT_POP) %>%
+  rename(county = "CTYNAME",
+         age = "AGEGRP",
+         pop = "TOT_POP") %>%
+  mutate(county = str_remove(county, " County"))
+ccest_tot <- ccest %>%
+  filter(age == 0)
+ccest <- left_join(
+  ccest %>% 
+    filter(age > 0) %>%
+    mutate(age = unique(wiHistPosAge$age)[ceiling(age / 2)]),
+  ccest_tot %>% select(-age) %>% rename(tot = "pop"),
+  by = c("county")) %>%
+  mutate(pct = 100 * pop / tot) %>%
+  group_by(county, age, tot) %>%
+  summarize_all(sum) %>%
+  ungroup
+```
+
+
+### Tufts data
+
+```{r}
+(tufts <- read_csv("data/stateCovidProbabilities.csv") %>%
+  rename(students = "num_students") %>%
+  mutate(m = match(state, tolower(state.name), nomatch = 0),
+         state = ifelse(m > 0, state.abb[m], state),
+         state = ifelse(state == "district of columbia", "DC", state),
+         state = ifelse(state == "puerto rico", "PR", state)) %>%
+   select(-m)) %>%
+  select(state,students) %>%
+  write_csv("tufts.csv")
+```
+

@@ -1,0 +1,147 @@
+---
+title: "Building Occupancy"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(ggmap)
+```
+
+## Instructional use of Buildings
+
+```{r}
+days <- as.list(dir("data/classes"))
+attend <- map(days, function(x) read_csv(file.path("data/classes", x)))
+names(attend) <- str_remove(unlist(days), ".csv")
+days <- days == "sunday.csv"
+sunday <- attend[["sunday"]] %>%
+  rename(building = "Building Name") %>%
+  mutate(day = "sunday") %>%
+  select(day, building, Student, Instructor)
+attend <- bind_rows(attend[!days], .id = "day") %>%
+  rename(ind = "Instructor Student Ind",
+         ct = "Distinct count of Emplid",
+         building = "Building Name") %>%
+  pivot_wider(names_from = "ind", values_from = "ct") %>%
+  select(day, building, Student, Instructor)
+attend <- bind_rows(attend, sunday) %>%
+  pivot_longer(Student:Instructor, names_to = "role", values_to = "count") %>%
+  arrange(role, building)
+```
+
+```{r}
+attend_wk <- attend %>%
+  group_by(role, building) %>%
+  summarize(count = sum(count)) %>%
+  ungroup %>%
+  pivot_wider(names_from = "role", values_from = "count")
+```
+
+```{r}
+write_csv(attend_wk, "attend_week.csv")
+```
+
+## Research use of Buildings
+
+```{r}
+floor <- read_excel("data/ResearchRebootPhase2-2020-08-01.xls",
+                         sheet = "PeopleBuildingsData") %>%
+  rename(People = "Person Count") %>%
+  mutate(Floor = ifelse(Floor == "No", "0", Floor),
+         People = ifelse(People == "No", "0", People),
+         Floor = as.numeric(Floor),
+         People = as.numeric(People)) %>%
+  group_by(Building, Floor) %>%
+  summarize(People = sum(People, na.rm = TRUE)) %>%
+  ungroup
+```
+
+```{r}
+building <- floor %>%
+  group_by(Building) %>%
+  summarize(People = sum(People, na.rm = TRUE)) %>%
+  ungroup %>%
+  filter(People > 0 & !is.na(People)) %>%
+  mutate(bldg_num = str_remove(Building, "[A-Z]* -.*"),
+         bldg_name = str_remove(Building, ".*- "),
+         bldg_title = tolower(str_remove_all(bldg_name, 
+           " (Memorial|Building|Bldg|Laboratory|Laboratories|Hall|Center|Street|St)")),
+         bldg_title = str_replace(tolower(bldg_title), "^(.*)-(.*)", "\\2 \\1"),
+         bldg_title = str_remove(bldg_title, "deluca "))
+```
+
+```{r}
+write.csv(building %>% select(Building, bldg_name, People), "buildings.csv", row.names = FALSE)
+```
+
+### Map of campus buildings
+
+I can only carry this so far because names do not match well.
+
+<https://accessibility.fpm.wisc.edu/campus-building-locations-entrances/>
+
+<https://www.storybench.org/geocode-csv-addresses-r/>
+
+The map is built on https://www.mapbox.com/, which offers a large amount of customization on how to display a map.  It seems like there’s some way to add data to this, but I only glanced through they docs: https://docs.mapbox.com/help/how-mapbox-works/.  I’ve never used this, and it looks pretty complicated, but I’d wager to guess that someone in the university has experience in this in order to create the map.wisc.edu site.  
+
+
+```{r}
+addr <- read_csv("data/campus_address.csv") %>%
+  mutate(Name = ifelse(grepl("SEWELL", Name), "Sewell Social Sciences", Name),
+         Name = ifelse(Name == "ANIMAL HEALTH & BIOMEDICAL SCIENCES BLDG", "Hansen Biometical Sciences", Name),
+         Name = ifelse(Name == "MEAT SCIENCE AND MUSCLE BIOLOGY LAB", "Meat Science & Animal Biologics Discovery", Name),
+         bldg_title = str_remove(tolower(Name), " (memorial|building|bldg|laboratory|laboratories|hall|center|street|st)"),
+         bldg_title = str_replace(tolower(bldg_title), "^(.*), (.*)", "\\2 \\1"),
+         bldg_title = str_replace(tolower(bldg_title), "^(.*)-(.*)", "\\2 \\1"),
+         bldg_title = ifelse(grepl("zoology", bldg_title), 
+                             str_replace(bldg_title, "zoology", "integrative biology"), bldg_title))
+```
+
+```{r}
+m <- pmatch(building$bldg_title, addr$bldg_title)
+building$bldg_name[is.na(m)]
+```
+
+
+```{r}
+tmpfn2 <- function(x) {
+  if(is.na(x[1]) | x[1] == "NA") {
+    x[2]
+  } else {
+    b <- strsplit(x[2], ",")[[1]]
+    m <- match(x[1], b)
+    if(!is.na(m)) {
+      x[1]
+    } else {
+      ""
+    }
+  }
+}
+tmpfn <- function(a, b) {
+  m <- data.frame(a, b)
+  apply(m, 1, tmpfn2)
+}
+m <- match(building$bldg_title, addr$bldg_title)
+ma <- map(as.list(building$bldg_title), function(x) agrep(x, addr$bldg_title))
+tmp <- cbind(m, sapply(ma, function(x) paste(x, collapse = ",")), building$bldg_name)
+colnames(tmp) <- c("VCRGE","Access", "Name")
+tmp <- as_tibble(tmp) %>% 
+  mutate(Access = tmpfn(VCRGE, Access),
+         VCRGE = as.numeric(VCRGE))
+tmp %>%
+  filter(is.na(VCRGE) & Access == "") %>% 
+  select(Name)
+```
+
+```{r}
+tmp
+```
+
+
+

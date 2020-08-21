@@ -1,0 +1,245 @@
+---
+title: "Athletics"
+output: html_document
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(shiny)
+library(RcppRoll)
+```
+
+```{r}
+radioButtons("unit","", c("Daily","Weekly"), "Daily", inline = TRUE)
+fileInput("ath", "Data File:", accept = ".xlsx")
+```
+
+```{r}
+#excel_sheets("Athletics COVID-19 Testing Log.xlsx")
+filename <- reactive({input$ath})
+ath <- reactive({
+  req(filename())
+  data_row <- grep("^Date$",
+                   read_excel(filename()$datapath, col_names = FALSE)[[1]])
+  read_excel(filename()$datapath,
+                  skip = data_row - 1) %>%
+  rename(test_return = "New Tests",
+         pos_return = "Positive Results",
+         test_observe = "# of Tests",
+         pos_observe = "# of Positives",
+         trace = "# Positive Contact Traces Completed",
+         test_contacts = "Number of Newly Quarantined Contacts", # students and staff quarantined
+         isolate = "# F/U Tests on Quarantined / Isolated",
+         pos_contacts = "Positive Results from Quarantine Testing",
+         pos2 = "Repeat Positive Result",
+         pos_nonuw = "Non-UW Test Positive Result", # tests from outside UW of staff (or students?)
+         release = "# Newly Released from Quarantine",
+         recover = "# Patients Cleared / Recovered") %>%
+  select(Date:recover) %>%
+  mutate_if(is.numeric, function(x) {
+    x[is.na(x)] <- 0
+    x
+  })
+})
+```
+
+```{r}
+# Add useful columns 
+add_useful <- function(ath) {
+  ath %>%
+  mutate(test = test_return + test_observe + test_contacts,
+         test_all = test + pos_nonuw,
+         pos = pos_return + pos_observe + pos_contacts,
+         pos_all = pos + pos_nonuw,
+         pos_oncampus = pos_all - pos_return,
+         num_test_return = cumsum(test_return),
+         num_pos_return = cumsum(pos_return),
+         num_test = cumsum(test),
+         num_pos = cumsum(pos),
+         num_test_all = cumsum(test_all),
+         num_pos_all = cumsum(pos_all),
+         num_test_contacts = cumsum(test_contacts),
+         num_pos_contacts = cumsum(pos_contacts),
+         num_pos_oncampus = num_pos_all - num_pos_return,
+         num_traced = cumsum(trace),
+         num_recovered = cumsum(recover),
+         num_isolated = num_pos_all - num_recovered,
+         num_quarantined = num_test_contacts - cumsum(release)
+         ) %>%
+  mutate(pct_pos_return = 100 * num_pos_return / num_test_return,
+         pct_pos = 100 * num_pos / num_test,
+         pct_pos_all = 100 * num_pos_all / num_test_all,
+         pct_pos_contacts = 100 * num_pos_contacts / num_test_contacts,
+         pct_pos_oncampus = 100 * num_pos_oncampus / num_test_all,
+         num_traced = num_test_contacts / num_traced)
+}
+```
+
+```{r}
+ath7 <- reactive({
+  req(ath())
+  ath() %>%
+  select(test_return:recover) %>%
+  mutate(Week = ceiling(row_number() / 7)) %>%
+  group_by(Week) %>%
+  summarize_all(sum) %>%
+  ungroup
+})
+```
+
+```{r}
+ath2 <- reactive({
+  req(ath(), input$unit)
+  add_useful(
+    switch(input$unit,
+      Daily = ath(),
+      Weekly = ath7()))
+}) 
+```
+
+```{r}
+dat <- reactive({
+  req(ath2(), input$unit)
+  switch(input$unit,
+         Daily = {
+           ath2() %>%
+             select(Date, test_return, test, test_all, pos_return, pos, pos_all, pos_oncampus) %>%
+             mutate(pct_pos_return = round(100 * tmpfn(pos_return) / tmpfn(test_return), 2),
+                    pct_pos = round(100 * tmpfn(pos) / tmpfn(test), 2),
+                    pct_pos_all = round(100 * tmpfn(pos_all) / tmpfn(test_all), 2),
+                    pct_pos_oncampus = round(100 * tmpfn(pos_oncampus) / tmpfn(test_all), 2),
+                    test_return = round(tmpfn(test_return), 2),
+                    test = round(tmpfn(test), 2),
+                    test_all = round(tmpfn(test_all), 2))
+         },
+         Weekly = {
+           ath2() %>%
+             select(Week, test_return, test, test_all, pos_return, pos, pos_all, pos_oncampus) %>%
+             mutate(pct_pos_return = round(100 * pos_return / test_return, 2),
+                    pct_pos = round(100 * pos / test, 2),
+                    pct_pos_all = round(100 * pos_all / test_all, 2),
+                    pct_pos_oncampus = round(100 * (pos_oncampus) / test_all, 2))
+         })
+})
+```
+
+```{r}
+timeunit <- reactive({
+  req(ath(), input$unit)
+  switch(input$unit,
+      Daily = "Date",
+      Weekly = "Week")
+})
+```
+
+Here the `pos_all` adds the non-UW positives to both the number of positives and number of tests; there is no adjustment for how many tests are performed off campus. The `pos_oncampus` is `pos_all` without the `pos_return` values.
+
+```{r}
+plot_ath <- function(ath, timevar = "Date", plotvars, yvar = "percent", 
+                     title ="", ...) {
+  req(ath())
+  dat <- ath %>%
+           select(matches(timevar), all_of(plotvars)) %>%
+           pivot_longer(-matches(timevar), names_to = "response", values_to = yvar) %>%
+           mutate(response = str_remove(response, "[a-z]*_")) %>%
+           mutate(response = factor(response, str_remove(plotvars, "[a-z]*_")))
+ ggplot(dat) +
+    aes_string(timevar, yvar, col = "response") +
+    geom_line(size = 2) +
+    facet_grid(response ~ ., scales = "free_y") +
+    theme(legend.position = "none") +
+    ggtitle(paste(title, "by", timevar))
+}
+plot_ath_pct <- function(ath, 
+                         plotvars = c("pct_pos_return", "pct_pos", "pct_pos_all", "pct_pos_oncampus", "pct_pos_contacts"),
+                         title = "Percent Positive", ...) {
+  plot_ath(ath, plotvars = plotvars, title = title, ...)
+}
+plot_ath_num <- function(ath, 
+                         plotvars = c("num_pos_return", "num_pos", "num_pos_all", "num_pos_oncampus", "num_pos_contacts"),
+                         title = "Count of Positive Test Results", ...) {
+  plot_ath(ath, plotvars = plotvars, title = title,
+           yvar = "count", ...)
+}
+plot_ath_rate <- function(ath, plotvars = c("num_traced"),
+                          title = "Rate of Contacts per Positive Test",
+                          ...) {
+  plot_ath(ath, 
+           yvar = "rate", plotvars = plotvars, title = title, ...)
+}
+```
+
+```{r}
+renderPlot({
+  plot_ath_pct(ath2(), timevar = timeunit())
+})
+```
+
+```{r}
+renderPlot({
+  plot_ath_num(ath2(), timevar = timeunit())
+})
+```
+
+```{r}
+renderPlot({
+  plot_ath_rate(ath2(), timevar = timeunit())
+})
+```
+
+```{r}
+renderPlot({
+  plot_ath_num(ath2(), timevar = timeunit(),
+               plotvars = c("num_test_return", "num_test", "num_test_all", "num_test_contacts"),
+               title = "Count of Tests")
+})
+```
+
+```{r}
+renderPlot({
+  plot_ath_num(ath2(), timevar = timeunit(),
+               plotvars = c("num_isolated", "num_traced", "num_quarantined", "num_recovered"),
+               title = "Count of Isolated, Traced, Quarantined and Recovered")
+})
+```
+
+```{r}
+tmpfn <- function(x) {
+  x <- roll_mean(x, 7, na.rm = TRUE)
+  c(rep(x[1], 6), x)
+}
+```
+
+```{r}
+renderPlot({
+  plot_ath_pct(dat(), timevar = timeunit(),
+               plotvars = c("pct_pos_return", "pct_pos", "pct_pos_all", "pct_pos_oncampus"),
+               title = "Immediate Percent Positive")
+})
+```
+
+```{r}
+renderPlot({
+  plot_ath_num(dat() %>%
+                 mutate(num_test_return = test_return,
+                        num_test = test,
+                        num_test_all = test_all),
+               timevar = timeunit(),
+               plotvars = c("num_test_return", "num_test", "num_test_all"),
+               title = "Immediate Test Count")
+})
+```
+
+```{r}
+renderDataTable({
+  req(dat())
+  dat()
+})
+```
+

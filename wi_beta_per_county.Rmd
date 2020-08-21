@@ -1,0 +1,281 @@
+---
+title: "Adjusted positivity"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+kprint <- function(x) {
+  if(interactive()) {
+    print(x)
+  } else {
+    knitr::kable(x)
+  }
+}
+library(httr) 
+library(jsonlite)
+library(data.table)
+library(simpleboot)
+```
+
+### Wisconsin Historical Testing Data by County
+
+The data are published daily at <https://data.dhsgis.wi.gov/datasets/covid-19-historical-data-table/data>.
+There is manual download of CSV or automated API access. The first part of the code translates the JSON file from API to a data frame. For the whole state and each county, we get total positive and negative tests. For the state, we get the number of positives by 10-year age groups, but not the number of negative by age group.
+```{r}
+jsonResponse <- GET("https://opendata.arcgis.com/datasets/b913e9591eae4912b33dc5b4e88646c5_10.geojson")
+jsonResponseText <- content(jsonResponse, as = "text")
+dataJSON <- fromJSON(jsonResponseText)
+data_WI <- dataJSON$features
+data_WI <- do.call("rbind", data_WI)
+data_WI <- as.data.frame(data_WI)
+```
+
+```{r}
+wiHist <- data_WI %>%
+  filter(GEO == "State") %>%
+  select(DATE, NEGATIVE, POSITIVE, POS_0_9:POS_90) %>%
+  mutate(DATE = as.POSIXct(DATE)) %>%
+  filter(max(DATE) - DATE < 7 * 86400) %>%
+  select(-DATE) %>% mutate_if(is.character, as.numeric) %>%
+  summarize_all(function(x) diff(range(x)))
+```
+
+Negatives and positives for WI.
+
+```{r}
+wiHist[1:2] %>% 
+  kprint()
+```
+
+Positive for WI by age group.
+
+```{r}
+(wiHistPos <- wiHist %>%
+  pivot_longer(POS_0_9:POS_90, names_to = "age", values_to = "pos") %>%
+  filter(!is.na(pos)) %>%
+  mutate(age = str_remove(age, "POS_"))) %>%
+  kprint
+```
+In all the state of Wisconsin, the percent of positives from people between 20 and 29 years old is:
+```{r}
+pct_pos_20_29 = (wiHistPos[wiHistPos$age == "20_29","pos"]/sum(wiHistPos[,"pos"]))*100
+pct_pos_20_29 %>%
+  kprint
+```
+Negatives and positives by county in WI.
+```{r}
+(wiHistCo <- data_WI %>%
+   filter(GEO == "County") %>%
+   select(DATE, NAME, NEGATIVE, POSITIVE) %>%
+   rename(county = "NAME") %>%
+   mutate(DATE = as.POSIXct(DATE)) %>%
+   filter(max(DATE) - DATE < 7 * 86400) %>%
+   select(-DATE) %>%
+   group_by(county) %>% 
+   mutate(NEGATIVE = as.numeric(NEGATIVE), POSITIVE = as.numeric(POSITIVE)) %>%
+   summarize_all(function(x) diff(range(x))) %>% 
+   ungroup %>%
+   mutate(pct_pos = 100 * POSITIVE / (POSITIVE + NEGATIVE)) %>%
+   arrange(desc(pct_pos))) %>%
+   kprint()
+```
+If we assume that the same percent of positives in each county comes from people between 20 and 29 years old, we can adjust the count of positive cases by multiplying
+### Census Data on age distribution
+```{r}
+(wiHistCo <- wiHistCo %>%
+  mutate( ADJ_POSITIVE_20_29 = as.numeric(pct_pos_20_29/100)*POSITIVE ) %>%
+  mutate( ADJ_POSITIVE_20_29 =  round(ADJ_POSITIVE_20_29,0) ) )%>%
+   kprint()
+```
+
+These data are from Census <https://www.census.gov/data/datasets/time-series/demo/popest/2010s-counties-detail.html>
+using the ALLDATA set. These data have age distribution in the most recent year. FIPS for WI is 55.
+
+```{r}
+# AGEGRP 0=total, 1:18 in 5-year intervals 
+ccest <- read_csv("data/cc-est2019-alldata-55.csv") %>%
+  filter(YEAR == max(YEAR)) %>% # most recent year
+  select(CTYNAME, AGEGRP, TOT_POP) %>%
+  rename(county = "CTYNAME",
+         age = "AGEGRP",
+         pop = "TOT_POP") %>%
+  mutate(county = str_remove(county, " County"))
+ccest_tot <- ccest %>%
+  filter(age == 0)
+(ccest <- left_join(
+  ccest %>% 
+    filter(age > 0) %>%
+    mutate(age = unique(wiHistPos$age)[ceiling(age / 2)]),
+  ccest_tot %>% select(-age) %>% rename(tot = "pop"),
+  by = c("county")) %>%
+  mutate(pct = 100 * pop / tot) %>%
+  group_by(county, age, tot) %>%
+  summarize_all(sum) %>%
+  ungroup) %>%
+  filter(age == "20_29") %>%
+  arrange(desc(pop)) %>%
+  kprint()
+```
+The total count for all Wisconsin is
+```{r}
+(ccest_WI <- ccest %>%
+   filter(age == "20_29") %>%
+   select(age, tot, pop) %>%
+   summarize(tot = sum(tot), pop = sum(pop)) %>%
+   mutate(pct = 100 * pop / tot) %>%
+   mutate(age = "20_29") %>%
+   relocate(age)) %>%
+  kprint()
+```
+If we assume that the tests were applied uniformly in all the population (without importance of age), we can adjust the number of tests (NEGATIVE + POSITIVE) by multiplying
+
+```{r}
+(wiPOSco_20_29 <- full_join( ccest %>% filter(age == "20_29"), 
+           wiHistCo, 
+           by = "county") %>%
+  select(-tot, -pop) %>%
+  mutate(TOTAL_TESTS = NEGATIVE + POSITIVE) %>%
+  mutate(ADJ_TOTAL_TESTS_20_29 = (pct/100)*TOTAL_TESTS) %>%
+  mutate(ADJ_TOTAL_TESTS_20_29 = round(ADJ_TOTAL_TESTS_20_29,0)) %>%
+  #mutate(adj_pct_pos_20_29 = 100*(ADJ_POSITIVE_20_29/ADJ_TOTAL_TESTS_20_29)) %>%
+  select(-POSITIVE, -NEGATIVE, -pct, -age, -pct_pos, -TOTAL_TESTS)) %>%
+  kprint()
+```
+Using an approach from Quantitative Microbial Risk Assessment (QMRA), we simulate 1000 observations of a Beta distribution with parameters  a =ADJ_POSITIVE_20_29 + 1 and b = ADJ_TOTAL_TESTS_20_29 - ADJ_POSITIVE_20_29 + 1. 
+```{r}
+library(boot)
+confidence = function(a,b){
+  x = rbeta(1000, a, b)
+  x.boot = one.boot(x, mean, R=1000)
+  #confi = boot.ci(x.boot, type="bca")
+  resulta = perc(x.boot, p = c(0.025, 0.50, 0.975))
+  return(  c( resulta[1], resulta[2], resulta[3] ) )
+}
+
+wiPOSco_20_29 <- wiPOSco_20_29 %>%
+  mutate(a = ADJ_POSITIVE_20_29 + 1, b = ADJ_TOTAL_TESTS_20_29 - ADJ_POSITIVE_20_29 + 1) %>%
+  rowwise() %>%
+  mutate(confidence_int = list(confidence(a,b)) ) 
+
+(wiPOSco_20_29 <- wiPOSco_20_29 %>% rowwise() %>%
+  mutate(lower_pos = 100*confidence_int[1], upper_pos = 100*confidence_int[3], 
+         median_pos = 100*confidence_int[2] ) %>%
+  select(-confidence_int)) %>%
+  kprint()
+```
+
+
+```{r}
+ggplot(ccest %>% filter(age == "20_29")) +
+  aes(tot, pct) +
+  geom_point() +
+  scale_x_log10() +
+  xlab("County Population") +
+  ylab("Percent aged 20-29")
+```
+
+```{r}
+co_data <- full_join(
+  ccest %>%
+    filter(age == "20_29"),
+  wiPOSco_20_29, #wiHistCo
+  by = "county")
+co_data = co_data %>% select(-ADJ_POSITIVE_20_29, -ADJ_TOTAL_TESTS_20_29,-a,-b)
+```
+
+```{r}
+ggplot(co_data) +
+  aes(pct, median_pos) +
+  geom_point() +
+  ylab("Percent Postive COVID-19 among 20-29 people") +
+  xlab("Percent aged 20-29")
+```
+
+### WI Dormitory arrival
+
+This file (in Box as [COVID-19/Aggregated Data/Fall 2020 Housing State County Country.xlsx](https://uwmadison.box.com/s/bx0qyaabylhjpy062qzzhy2punlywrug)) contains records with county level information from across the country. Only looking here at WI counties.
+
+```{r}
+wiDorm <- read_excel("data/Fall 2020 Housing State County Country.xlsx") %>%
+  rename(state = "HOME_ADDRESS_STATE",
+         county = "HOME_COUNTY_DESCR") %>%
+  mutate(state = ifelse(HOME_COUNTRY_CODE != "USA", "international", state),
+         state = ifelse(state == "AE", "international", state)) %>%
+  count(state, county) %>%
+  rename(students = "n") %>%
+  arrange(state, county) %>%
+  filter(state == "WI")
+```
+
+```{r}
+wiDorm_test <- full_join(
+  co_data,
+  wiDorm,
+  by = "county")
+```
+
+```{r}
+ggplot(wiDorm_test) +
+  aes(students, median_pos) +
+  geom_point() +
+  scale_x_log10() +
+  ylab("Percent Postive COVID-19 among 20-29 people") +
+  xlab("Number of Students in Dorm")
+```
+
+There are three counties accounting for most of the dorm students. Question is, can we get better age-group estimates of the percent positive on diagnostic test?
+
+```{r}
+wiDorm_test %>%
+  filter(students > 400) %>%
+  kprint()
+```
+
+
+```{r}
+ggplot(wiDorm_test) +
+  aes(students, students * median_pos / 100) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() + 
+  ylab("Expected Postive COVID-19 based on County") +
+  xlab("Number of Students in Dorm")
+```
+
+```{r}
+(wiDorm_pos <- wiDorm_test %>%
+  mutate(students_pos = students * median_pos / 100) %>%
+  mutate(lower_st_pos = students * lower_pos / 100) %>%
+  mutate(upper_st_pos = students * upper_pos / 100) %>%
+  select(county, students, lower_pos, median_pos, upper_pos, 
+         lower_st_pos, students_pos, upper_st_pos) %>%
+  arrange(desc(students_pos))) %>%
+  kprint()
+```
+
+Expected number of students positive: `r round(sum(wiDorm_pos$students_pos, na.rm = TRUE))`.
+
+
+### Combine data and save as CSV
+
+```{r}
+write_csv(wiDorm_test, "wi_dorm_test.csv")
+```
+
+### Remarks
+
+- We are assuming that 18 and 19 year old students behave the same as the 20-29 y old students do, but is this true? Starting junior year in college, many students move out of the dorms. So, our estimate might be underestimates
+- Need the latest test results, because having been positive at some point is not the asame as arriving and being infectious. Consider narrowing the date of testing results in the Covid-19 historical data table.
+- Be careful with county level data for students, because they might become identifiable.
+- Calculate number of positives for all counties and all arriving states, but we know that this data might not be available for all states and counties (see Florida example).
+
+### References
+
+- Quantitative Microbial Risk Assessment (QMRA) by Vose et al 2003, 2009
+

@@ -1,0 +1,203 @@
+---
+title: "Adjusted positivity"
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+kprint <- function(x) {
+  if(interactive()) {
+    print(x)
+  } else {
+    knitr::kable(x)
+  }
+}
+library(httr)
+library(jsonlite)
+library(data.table)
+library(simpleboot)
+library(boot)
+library(readxl)
+```
+
+### Wisconsin Historical Testing Data by County for 18-29 age group
+
+Loading the data from Wisconsin Electronic Disease Surveillance System. Number of young adults with confirmed cases of COVID-19 and number tested for COVID-19 using diagnostic RNA test from June 1st to August 17th.
+```{r}
+data_WI <- read_excel("data/Number of confirmed cases and people tested among young adults - for UW - 18Aug2020.xlsx", sheet = 2, skip = 4, .name_repair = "minimal", na = c("","."))
+data_WI[is.na(data_WI)] <- 0
+data_WI[,2:3] <- data_WI[,2:3] + data_WI[, 7:8]
+data_WI <- data_WI %>%
+  select(1:3)
+names(data_WI) <- c("COUNTY", "POSITIVE", "TOTAL_TESTS")
+data_WI <- data_WI %>%
+  mutate(POSITIVE = ifelse(is.na(POSITIVE), 0, POSITIVE))
+```
+Using an approach from Quantitative Microbial Risk Assessment (QMRA), we simulate 1000 observations of a Beta distribution with parameters  a = POSITIVE + 1 and b = TOTAL_TESTS - POSITIVE + 1. 
+In tables below, the `_pos` values are percent positive cases, and `_st_pos` are expected number of positive students per county.
+
+```{r}
+confidence = function(a,b){
+  x = rbeta(1000, a, b)
+  x.boot = one.boot(x, mean, R=1000)
+  #confi = boot.ci(x.boot, type="bca")
+  resulta = perc(x.boot, p = c(0.025, 0.50, 0.975))
+  return(  c( resulta[1], resulta[2], resulta[3] ) )
+}
+
+wiPOSco_18_29 <- data_WI %>%
+  mutate(a = POSITIVE + 1, b = TOTAL_TESTS - POSITIVE + 1) %>%
+  rowwise() %>%
+  mutate(confidence_int = list(confidence(a,b)) ) 
+
+(wiPOSco_18_29 <- wiPOSco_18_29 %>% rowwise() %>%
+  mutate(lower_pos = round(100*confidence_int[1], 2),
+         upper_pos = round(100*confidence_int[3], 2),
+         median_pos = round(100*confidence_int[2], 2)) %>%
+  select(-confidence_int) %>% arrange(desc(median_pos))) %>%
+  kprint()
+```
+```{r}
+co_data <- wiPOSco_18_29 %>% select(-a, -b)
+co_data <- co_data %>%
+  rename(county = COUNTY) %>%
+  mutate(raw_pct = 100 * POSITIVE / TOTAL_TESTS)
+```
+
+```{r}
+ave_pos <- 100 * sum(co_data$POSITIVE) / sum(co_data$TOTAL_TESTS)
+```
+
+```{r}
+ggplot(
+  co_data %>%
+    pivot_longer(lower_pos:median_pos, names_to = "meaning", values_to = "pos")) +
+  aes(raw_pct, pos, col = meaning, size = TOTAL_TESTS) +
+  geom_abline(slope = 1, intercept = 0, col = "grey") +
+  geom_hline(yintercept = ave_pos, col = "grey") +
+  geom_vline(xintercept = ave_pos, col = "grey") +
+  geom_point(alpha = 0.5)
+```
+
+
+### WI Dormitory arrival
+
+This file (in Box as [COVID-19/Aggregated Data/Fall 2020 Housing State County Country.xlsx](https://uwmadison.box.com/s/bx0qyaabylhjpy062qzzhy2punlywrug)) contains records with county level information from across the country. Only looking here at WI counties.
+
+```{r}
+wiDorm <- read_excel("data/Fall 2020 Housing State County Country.xlsx") %>%
+  rename(state = "HOME_ADDRESS_STATE",
+         county = "HOME_COUNTY_DESCR") %>%
+  mutate(state = ifelse(HOME_COUNTRY_CODE != "USA", "international", state),
+         state = ifelse(state == "AE", "international", state)) %>%
+  count(state, county) %>%
+  rename(students = "n") %>%
+  arrange(state, county) %>%
+  filter(state == "WI")
+```
+
+```{r}
+wiDorm_test <- full_join(
+  co_data,
+  wiDorm,
+  by = "county")
+```
+
+```{r}
+ggplot(wiDorm_test) +
+  aes(students, median_pos) +
+  geom_point() +
+  scale_x_log10() +
+  ylab("Percent Postive COVID-19 for people aged 18-29 during Jun-Aug") +
+  xlab("Number of Students in Dorm")
+```
+
+There are three counties accounting for most of the dorm students.
+
+```{r}
+wiDorm_test %>%
+  filter(students > 400) %>%
+  kprint()
+```
+
+
+```{r}
+ggplot(wiDorm_test) +
+  aes(students, students * median_pos / 100) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() + 
+  ylab("Expected Postive COVID-19 based on County") +
+  xlab("Number of Students in Dorm")
+```
+
+```{r}
+(wiDorm_pos <- wiDorm_test %>%
+  mutate(students_pos = round(students * median_pos / 100, 2)) %>%
+  mutate(lower_st_pos = round(students * lower_pos / 100, 2)) %>%
+  mutate(upper_st_pos = round(students * upper_pos / 100, 2)) %>%
+  select(county, students, lower_pos, median_pos, upper_pos, 
+         lower_st_pos, students_pos, upper_st_pos) %>%
+  arrange(desc(students_pos))) %>%
+  kprint()
+```
+
+#### Expected number of across state
+
+\ 
+
+The expected number of students positive across the state is `r round(sum(wiDorm_pos$students_pos, na.rm = TRUE))`,
+with lower and upper limits
+(`r round(sum(wiDorm_pos$lower_st_pos, na.rm = TRUE))`,
+`r round(sum(wiDorm_pos$upper_st_pos, na.rm = TRUE))`).
+
+
+```{r}
+#Combine data and save as CSV
+write_csv(wiDorm_test, "wi_dorm_test.csv")
+```
+
+### Remarks
+
+These numbers are considerably higher than what is projected from Moon Duchin's app <https://mggg.github.io/estimate-incoming/>. That tool is at the state level, and uses three models (IHME, YYG, NYT). Those models show estimated positive rates of 0.24%, 0.81%, and 1.0%, respectively, with estimated number of positive cases for WI residents coming to the dorms (3878 total) of 9.3, 31.3, and 38.7, respectively.
+
+Why are these numbers so different? This current document uses the actual test results, which are then "shrunk" slightly using a Bayesian approach. Still, the actual positive rate probably weighs symptomatic cases heavily. That is, in many counties, the young people getting tested are probably symptomatic, and more likely to have COVID-19 than the general public. If that is the case, then we should down-weight the calculations somehow to reflect that. The problem is that we don't have a really good way to do that.
+
+Duchin's approach draws on models (in particulary IHME and YYG) that use the less biased number of deaths to correct the percent positive. Our overall raw estimated percent positive is
+`r round(100 * sum(co_data$POSITIVE) / sum(co_data$TOTAL_TESTS), 2)`, which is about 10x the estimates from the YYG and NYT model. If we downweight our count by a factor of 10, we woul estimate 
+`r round(sum(wiDorm_pos$students_pos, na.rm = TRUE) / 10, 2)` positive cases.
+This deserves further consideration.
+
+Right now WI is at 7% positive compared to <1% estimated by IHME and YYG. Compare that to 8.5% (=320/3850) for 18-29 age group from your analysis, which is higher than 7% (20% more), due likely to several reasons given below. 
+
+However, the two values derived only from percent positive test results are qute different from the IHME and YYG (and NYT) estimates. IHME and YYG primarily use death data. YYG uses an SEIR model, while IHME (at least in the past) used a curve-fitting approach. Further, Duchin uses a linear reweighting of positivity over two weeks to adjust the IHME, YYG and NYT values.
+
+Bottom line is that we have different estimates with different assumptions, which include issues of substantial bias due to who actually chooses to take a diagnostic test for COVID-19, and how the disease progresses over a period of weeks
+
+Explanations for the differences in estimates for positive upon arrival can be:
+
+- this age group of young adults has a particularly high risk for positives, because of potential for neglecting social distancing and preventive measures, intense social contacts and high mixing of individuals (see age distribution of positives in general population, 20-29 year-olds are the population fraction with highest positive risk);
+- averaging the risk for positives across all age groups and not accounting for total number tested by age group will result in an overestimate of total # tested and underestimates of # positives when using the web model estimates
+- updated data use best knowledge # total tested and # positives for age group 18-29 years-old; no assumptions, reported counts only; this creates transparency for the estimates
+- note that estimates are based on time interval for tests reported June 1st - current (8-19-20); not all positive upon arrival need be infectious
+
+
+Below are some technical remarks:
+
+- Need the latest test results, because having been positive at some point is not the asame as arriving and being infectious. Consider narrowing the date of testing results in the Covid-19 historical data table.
+- Be careful with county level data for students, because they might become identifiable.
+- Calculate number of positives for all counties and all arriving states, but we know that this data might not be available for all states and counties (see Florida example).
+
+### References
+
+- Quantitative Microbial Risk Assessment (QMRA) by Vose et al 2003, 2009
+- <https://pdfs.semanticscholar.org/b6ed/2712a4b34cf6ad30a940156a91095d536692.pdf>
+

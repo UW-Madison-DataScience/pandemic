@@ -30,7 +30,8 @@ roll7 <- function(x) {
   x <- roll_mean(x, 7)
   c(rep(x[1], 6), x)
 }
-uhs <- read_sheet("https://docs.google.com/spreadsheets/d/1OZAoqEwHCaTOTpd3pC534-My3lGa0gUt-Hu0LD18cQ0",
+uhs <- scan("data/uhs.txt", "char")
+uhs <- read_sheet(uhs,
                   sheet = "COVID-data") %>%
   rename(
     Date = "Date_of_results",
