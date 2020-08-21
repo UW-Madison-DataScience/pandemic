@@ -1,0 +1,12 @@
+name: testing
+title: testing
+username: byandell
+account: byandell
+server: data-viz.it.wisc.edu
+hostUrl: https://data-viz.it.wisc.edu/__api__
+appId: 55
+bundleId: 310
+url: https://data-viz.it.wisc.edu/testing/
+when: 1598018796.92612
+asMultiple: FALSE
+asStatic: FALSE

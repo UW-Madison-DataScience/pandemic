@@ -1,0 +1,13 @@
+name: pandemic
+title: pandemic
+username:
+account: brianyandell
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 1958153
+bundleId: 3541863
+url: https://brianyandell.shinyapps.io/pandemic/
+when: 1598018104.65716
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: .Rbuildignore|.RData|app.R|dane.docx|dane.html|dane.pdf|dane.Rmd|deploy.Rmd|DESCRIPTION|gating.html|gating.pdf|gating.Rmd|pandemic.html|pandemic.R|pandemic.Rmd|pennmed.txt|README.md|ten_100.pdf|ten_hundred.R|uhs.html|uhs.Rmd|wi.csv|wi.R|R/pandemicApp.R|R/test.R|data

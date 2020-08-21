@@ -1,0 +1,61 @@
+---
+title: "gating"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message = FALSE}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(readr)
+library(stringr)
+library(lubridate)
+```
+
+```{r}
+wi <- read_csv("data/COVID-19_Historical_Data_Table_state.csv")
+coltypes <- str_c(str_sub(sapply(wi, class), 1, 1), collapse = "")
+co <- read_csv("data/COVID-19_Historical_Data_Table_county.csv",
+               col_types = coltypes)
+#cen <- read_csv("data/COVID-19_Historical_Data_Table_census.csv",
+#               col_types = coltypes, na = c("", "NA", "TRACT N/A"))
+wi <- wi %>%
+  mutate(DATE = as_date(DATE))
+```
+
+```{r}
+wi_race <- wi %>%
+  select(DATE, DTH_AIAN:DTH_UNK) %>%
+  pivot_longer(DTH_AIAN:DTH_UNK, names_to = "race", values_to = "count")
+```
+
+```{r}
+ggplot(wi) +
+  aes(DATE, POSITIVE) +
+  geom_line()
+```
+
+```{r}
+ggplot(wi_race) +
+  aes(DATE, count, col = race) +
+  geom_line() + 
+  scale_y_log10()
+```
+
+
+```{r}
+ggplot(wi) +
+  aes(DATE, HOSP_YES) +
+  geom_line()
+```
+
+```{r}
+ggplot(wi) +
+  aes(DATE, DEATHS) +
+  geom_line()
+```
+

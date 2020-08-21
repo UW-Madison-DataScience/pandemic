@@ -1,0 +1,78 @@
+---
+title: "UHS Testing Results"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+#library(googledrive)
+library(googlesheets4)
+library(RcppRoll)
+```
+
+```{r eval=FALSE}
+drive_auth("byandell@wisc.edu") do this once to authorize within google drive
+gs4_auth(token = drive_token())
+```
+
+```{r eval=FALSE}
+gs4_auth(email = "byandell@wisc.edu",
+         scopes = "https://www.googleapis.com/auth/spreadsheets.readonly")
+```
+
+```{r}
+roll7 <- function(x) {
+  x <- roll_mean(x, 7)
+  c(rep(x[1], 6), x)
+}
+uhs <- read_sheet("https://docs.google.com/spreadsheets/d/1OZAoqEwHCaTOTpd3pC534-My3lGa0gUt-Hu0LD18cQ0",
+                  sheet = "COVID-data") %>%
+  rename(
+    Date = "Date_of_results",
+    student_total = "Student_total_tests",
+    student_positive = "Student_positives",
+    facstaff_total = "Facstaff_total_tests",
+    facstaff_positive = "Facstaff_positives") %>%
+  mutate(Date = as.POSIXct(Date)) %>%
+  pivot_longer(student_total:facstaff_positive, names_to = "group", values_to = "value") %>%
+  mutate(count_type = str_remove(group, ".*_"),
+         group = str_remove(group, "_.*")) %>%
+  pivot_wider(names_from = "count_type", values_from = "value") %>%
+  group_by(group) %>%
+  mutate(cum_pos = cumsum(positive),
+         cum_total = cumsum(total),
+         roll_pos = roll7(positive),
+         roll_total = roll7(total),
+         cum_pct = 100 * cum_pos / cum_total,
+         roll_pct = 100 * roll_pos / roll_total) %>%
+  ungroup()
+```
+
+```{r}
+ggplot(uhs) +
+  aes(Date, positive, col = group) + 
+  geom_point() +
+  geom_path(linetype = "dashed") +
+  geom_path(aes(y=roll_pos), size = 2) +
+  ylab("Number Positive")
+```
+
+```{r}
+ggplot(uhs) +
+  aes(Date, roll_pct, col = group) + 
+  geom_path(size = 2) +
+  ylab("Percent Positive (7-day rolling mean)")
+```
+
+```{r}
+ggplot(uhs) +
+  aes(Date, cum_pos, col = group) + 
+  geom_path(size = 2) +
+  ylab("Cumulative Number Positive")
+```
+

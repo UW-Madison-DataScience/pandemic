@@ -1,0 +1,33 @@
+---
+title: "References"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Possibly Useful References
+
+- [A quantitative compendium of COVID-19 epidemiology (arXiv 1 Jun)](https://arxiv.org/abs/2006.01283)
+- [Estimated effectiveness of traveller screening to prevent international spread of 2019 novel coronavirus (2019-nCoV) (medRxiv Feb 2020)](https://doi.org/10.1101/2020.01.28.20019224)
+- [U.S. States Move to Expand Coronavirus Testing Capabilities (WSJ 9 May)](https://www.wsj.com/articles/coronavirus-latest-news-05-09-2020-11589015996)
+- [Testing millions a day (Harvard Apr 2020)](https://ethics.harvard.edu/test-millions)
+- [Without More Tests, America Can’t Reopen (Atlantic May 2020)](https://www.theatlantic.com/ideas/archive/2020/04/were-testing-the-wrong-people/610234/)
+- [Coronavirus Antibody Tests Have a Mathematical Pitfall (SciAmer Jul 2020)](https://www.scientificamerican.com/article/coronavirus-antibody-tests-have-a-mathematical-pitfall/)
+- [Contact Tracing Information (Google Doc)](https://docs.google.com/document/d/1m98FbRs8xTaSpiTH6jQmt8v8NaUhT7OmnLNivwNpy0E)
+
+#### Pooling into Batches
+
+Not discussed in this manuscript. Pooling, or batching, provides options to test more people with fewer kits, but with some added complexity to testing procedure.
+
+- [Policy Doc on Pooling (Sarada & Patel Mar 2020)](https://www.dropbox.com/s/ngclx0l1llnpkbb/PolicyDoc_Covid19_sarada_patel_May2020.pdf)
+- [Coronavirus Test Shortages Trigger a New Strategy: Group Screening (SciAmer May 2020)](https://www.scientificamerican.com/article/coronavirus-test-shortages-trigger-a-new-strategy-group-screening2/)
+- [Expanding Covid-19 Testing: Mathematical Guidelines for the Optimal Sample Pool Size Given Positive Test Rate (medRxiv May 2020)](https://www.medrxiv.org/content/10.1101/2020.05.21.20108522v1)
+- [The maths logic that could help test more people for coronavirus (The Conversation Apr 2020)](https://theconversation.com/the-maths-logic-that-could-help-test-more-people-for-coronavirus-134287)
+- [Five People. One Test. This Is How You Get There. (NY Times 5 May)](https://www.nytimes.com/2020/05/07/opinion/coronavirus-group-testing.html)
+- [Virus update: Everybody in the pool - for testing. What happens now as virus cases surge again (WiscNews Jun 2020)](https://www.wiscnews.com/news/national/virus-update-everybody-in-the-pool---for-testing-what-happens-now-as-virus/article_3baf0f16-7dc5-5590-a9d6-6cda3621bc87.html)
+- [Safer reopening will require millions more Covid-19 tests per day. One solution: ‘pool testing’ (STAT Jun 2020)](https://www.statnews.com/2020/06/26/pool-testing-covid-19/)
+- [Trump administration considering 'pool testing' for coronavirus, Fauci says (USA Today Jun 2020)](https://www.usatoday.com/story/news/health/2020/06/26/what-covid-19-pool-testing-faqs-faucis-proposal/3262870001/)
+- [Coronavirus testing: Anthony Fauci says task force 'seriously considering' new strategy (CNN Jun 2020)](https://www.msn.com/en-us/health/health-news/coronavirus-testing-anthony-fauci-says-task-force-seriously-considering-new-strategy/ar-BB160vg0?li=BBnb7Kz)

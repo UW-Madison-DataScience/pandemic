@@ -1,0 +1,118 @@
+---
+title: "R0 by County"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width=10, fig.height=10)
+```
+
+```{r message=FALSE}
+library(tidyverse)
+```
+
+```{r message=FALSE, warning=FALSE}
+# https://github.com/SteveGoldstein/Covid19computWI_R0
+source("https://raw.githubusercontent.com/SteveGoldstein/Covid19computWI_R0/master/lib/estimate.R")
+countyR0 <- calculateR0() %>%
+  rename(medianR0 = "Median(R)",
+         Q1R0 = "Quantile.0.25(R)",
+         Q3R0 = "Quantile.0.75(R)")
+```
+
+```{r}
+herc <- read.csv("data/herc.csv")
+```
+
+```{r}
+countyR0 <- left_join(
+  countyR0,
+  herc,
+  by = "county"
+)
+```
+
+```{r}
+ggplot(
+  countyR0 %>% 
+    filter(county == "Dane") %>%
+    pivot_longer(Q1R0:Q3R0, names_to = "quantile", values_to = "R0")) +
+  aes(t_end, R0, col = quantile) +
+  geom_hline(yintercept = 1, linetype="dashed") +
+  geom_line() +
+  scale_y_log10()
+```
+
+```{r}
+ggplot(countyR0 %>% filter(herc_region == "South Central")) +
+  aes(t_end, medianR0, col = county) +
+  geom_hline(yintercept = 1, linetype="dashed") +
+  geom_line() +
+  scale_y_log10()
+```
+
+```{r}
+ggplot(countyR0 %>% 
+         filter(herc_region == "South Central",
+                as.numeric(max(t_end) - t_end) <= 14)) +
+  aes(t_end, medianR0, col = county) +
+  geom_hline(yintercept = 1, linetype="dashed") +
+  geom_line() +
+  scale_y_log10()
+```
+
+```{r}
+ggplot(countyR0 %>%
+         filter(as.numeric(max(t_end) - t_end) <= 14)) +
+  aes(t_end, medianR0, col = county) +
+  geom_hline(yintercept = 1, linetype="dashed") +
+  geom_line() +
+  facet_wrap(~ herc_region) +
+  theme(legend.position = "none") +
+  scale_y_log10()
+```
+
+```{r}
+mds_conv <- function(dat, days = 14) {
+  # Convert R0 into MDS
+  if(!is.na(days)) {
+    dat <- dat %>%
+      filter(as.numeric(max(t_end) - t_end) <= 14)
+  }
+  mydata <- dat %>%
+    select(t_end, county, medianR0) %>%
+    mutate(medianR0 = log10(medianR0)) %>%
+    pivot_wider(names_from = "county", values_from = "medianR0") %>%
+    select(-t_end)
+  d <- dist(t(mydata)) # euclidean distances between the columns
+  fit <- cmdscale(d,eig=TRUE, k=2) # k is the number of dim
+  out <- as.data.frame(fit$points)
+  list(scale = out %>%
+    mutate(county = names(mydata)),
+    explained = 100 * fit$eig[1:2]^2 / sum(fit$eig^2))
+}
+```
+
+```{r}
+out <- 
+  transpose(
+    map(
+      split(countyR0, countyR0$herc_region), 
+      mds_conv))
+out_explained <- t(as_tibble(out$explained))
+out <- bind_rows(out$scale,
+                 .id = "herc_region")
+```
+
+```{r}
+apply(out_explained, 1, function(x) round(sum(x)))
+```
+
+```{r}
+ggplot(out) +
+  aes(V1, V2, label = county) +
+  geom_label() +
+  facet_wrap(~herc_region, scales = "free")
+```
+
+

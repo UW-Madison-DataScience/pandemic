@@ -1,0 +1,310 @@
+---
+title: "OHI Metrics"
+output: html_document
+---
+
+```{r include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(ohiCovidMetrics)
+library(readxl)
+source("R/shape_data.R")
+source("R/process_metrics.R")
+```
+
+Carl, as you begin to use more sensitive data, it would be useful to have APIs that allow user to specify the data origin and possibly the extraction tool. For instance, you are starting to use ODBC (Oracle), but I think we get copies of data from DHS into our SILO protected area as flat files. This is down the way (weeks), and we can work together on how to do this.
+
+This repository <https://github.com/byandell/gating>, which uses the [ohiCovidMetrics](https://github.com/carlbfrederick/ohiCovidMetrics) package, is where Yandell is exploring ideas.
+Please note the last image, which highlights counties that have had >5% positive tests during one of the past 4 weeks.
+
+Notice that I have modified versions of a couple of your routines. Key differences:
+
+- removed ".data$" for better readability
+- modified shape_data as generalization of shape_case_data:
+    + Took out pivot_wider() to keep longer format (go wide for plotting only)
+    + Added "weeks" option to look at more than 2 weeks
+    + Added test and death data
+- modified process_metrics as generalization of process_confirmed_cases
+    + Handle long format
+    + Handle all count types at once
+
+Part of my philosophy is to have more general routines when it makes sense to process similar data, here case, death, test. Note that I ran data through your metrics without adjustment, but down the road the guidelines for deaths or %pos could be added. Just an idea.
+
+Just a heads up that [ohiCovidMetrics](https://github.com/carlbfrederick/ohiCovidMetrics) requires R 4.0 and the `sf` and `ROBDC` packages. Upgrade to a major R version, requires reinstalling all your packages, such as `tidyverse`.
+
+## Data setup
+
+```{r pull-hist-table}
+hdt_raw <- pull_histTable(end_date = "2020-06-17") 
+```
+
+```{r shape_data}
+weeks <- 10
+hdt_clean <- shape_data(hdt_raw, weeks = weeks)
+```
+
+```{r eval=FALSE}
+hdt_out <- process_metrics(
+  hdt_clean %>%
+    filter(weeknum <= 2) %>%
+    pivot_wider(id_cols = c("fips", "geo_type", "geo_name", "pop_2018", "count_type"),
+                values_from = c("weekly", "week_end", "pct_pos"),
+                names_from = "weeknum"))
+```
+
+```{r}
+hdt_clean_pct <- hdt_clean %>%
+  filter(weeknum <= 4) %>%
+  group_by(fips, geo_type, geo_name, pop_2018, count_type) %>%
+  summarize(maxpospct = max(pct_pos),
+            minpospct = min(pct_pos),
+            curpospct = pct_pos[1],
+            maxcount = max(weekly),
+            mincount = min(weekly),
+            curcount = weekly[1]) %>%
+  ungroup()
+```
+
+## Pull out counties only
+
+```{r}
+hdt_co <- 
+  left_join(
+    hdt_raw %>%
+      filter(geo_type == "County") %>%
+      rename(county = "geo_name"),
+    county_data,
+    by = c("fips", "county", "pop_2018"))
+```
+
+```{r eval=FALSE}
+write.csv(distinct(hdt_co, county, dph_region, herc_region), file="herc.csv", row.names=FALSE)
+```
+
+```{r}
+hdt_co_clean <- 
+  left_join(
+    hdt_clean %>%
+      filter(geo_type == "County") %>%
+      rename(county = "geo_name"),
+    county_data,
+    by = c("fips", "county", "pop_2018"))
+```
+
+## Plots of Raw data
+
+```{r}
+ggplot(hdt_raw %>% 
+         filter(geo_type == "HERC Region")) +
+  aes(post_date, case_cum, col = geo_name) +
+  geom_line() +
+  xlab("Date") +
+  ylab("Cumulative Cases") +
+  scale_y_log10() +
+  ggtitle("Cumulative Counts over Time")
+```
+
+```{r}
+ggplot(hdt_raw %>% 
+         filter(geo_type == "HERC Region")) +
+  aes(test_cum, case_cum, col = geo_name) +
+  geom_abline(slope = 1, intercept = 0, col = "grey") +
+  geom_line() +
+  xlab("Cumulative Tests") +
+  ylab("Cumulative Cases") +
+  scale_x_log10() +
+  scale_y_log10() +
+  ggtitle("Cumulative Testing vs Cases")
+```
+
+```{r}
+ggplot(hdt_raw %>% 
+         filter(geo_type == "HERC Region",
+                max(post_date) - post_date <= 14)) +
+  aes(post_date, case_daily, col = geo_name) +
+  geom_line() +
+  xlab("Date") +
+  ylab("New Cases") +
+  scale_y_log10() +
+  ggtitle("New Cases by HERC Regions in Past 2 Weeks")
+```
+
+```{r}
+ggplot(hdt_co %>%
+         filter(max(post_date) - post_date <= 14)) +
+  aes(post_date, case_daily, col = county) +
+  geom_line() +
+  facet_wrap(~ herc_region, scales = "free_y") +
+  theme(legend.position = "none") +
+  xlab("Date") +
+  ylab("New Cases") +
+  scale_y_log10() +
+  ggtitle("New Cases by County in Past 2 Weeks")
+```
+
+```{r}
+ggplot(hdt_co %>%
+         filter(max(post_date) - post_date <= 14)) +
+  aes(post_date, test_daily, col = county) +
+  geom_line() +
+  facet_wrap(~ herc_region, scales = "free_y") +
+  xlab("Date") +
+  ylab("New Cases") +
+  theme(legend.position = "none") +
+  scale_y_log10() +
+  ggtitle("New Testing by County in Past 2 Weeks")
+```
+
+## Plots of Clean Data
+
+```{r}
+ggplot(hdt_co_clean %>% 
+         filter(count_type == "case",
+                weeknum < 3) %>%
+         pivot_wider(id_cols = c("county", "pop_2018", "herc_region"),
+                     values_from = c("weekly", "week_end", "pct_pos"),
+                     names_from = "weeknum") %>%
+         filter(weekly_2 != weekly_1)) +
+  aes(weekly_1, weekly_2 - weekly_1, col = county) +
+  geom_hline(yintercept = 0, col = "grey") +
+  geom_point() +
+  facet_wrap(~herc_region, scales = "free") +
+  theme(legend.position = "none") +
+  xlab("Current Week Count") +
+  ylab("Change from Last Week") +
+  ggtitle("Counties with Changes") +
+  scale_x_log10()
+```
+
+```{r warning=FALSE}
+ggplot(hdt_co_clean %>% 
+         filter(count_type == "case")) +
+  aes(weekly, pct_pos, col = county, label = weeknum) +
+  geom_hline(yintercept = 0, col = "grey") +
+  geom_text() +
+  geom_path() +
+  facet_wrap(~ herc_region, scales = "free") +
+  theme(legend.position = "none") +
+  xlab("Weekly Confirmed Cases") +
+  ylab("Percent Positive") +
+  scale_x_log10() +
+  ggtitle(paste("Cases by % Positive over Past", weeks, "Weeks"))
+```
+
+```{r warning=FALSE}
+ggplot(hdt_co_clean %>% 
+         filter(count_type != "death")) +
+  aes(weekly, pct_pos, col = county, label = weeknum) +
+  geom_hline(yintercept = 0, col = "grey") +
+  geom_path() +
+  geom_text() +
+  facet_grid(herc_region ~ count_type, scales = "free") +
+  theme(legend.position = "none") +
+  xlab("Weekly Count") +
+  ylab("Percent Positive") +
+  scale_x_log10() +
+  ggtitle(paste("Cases and Tests by % Positive over Past", weeks, "Weeks"))
+```
+
+```{r}
+(co_week4_pct5 <- left_join(
+    hdt_co_clean,
+    hdt_clean_pct %>%
+      rename(county = "geo_name"),
+    by = c("fips","geo_type","county","pop_2018","count_type")) %>% 
+    filter(count_type == "case",
+           weeknum <= 4,
+           maxpospct >= 5)) %>%
+  filter(count_type == "case") %>%
+  select(county, weeknum, weekly, pct_pos, herc_region) %>%
+  rename(case = "weekly", pct = "pct_pos") %>%
+  pivot_wider(id_cols = c("county","herc_region"),
+              values_from = c("case", "pct"),
+              names_from = "weeknum") %>%
+  arrange(herc_region, county)
+```
+
+```{r warning=FALSE}
+ggplot(co_week4_pct5 %>%
+         mutate(HighPos = (curpospct < 5))) +
+  aes(weekly, pct_pos, col = HighPos, group = county, label = weeknum) +
+  geom_hline(yintercept = 0, col = "grey") +
+  geom_path() +
+  geom_text() +
+  facet_wrap(~ herc_region, scales = "free") +
+  theme(legend.position = "none") +
+  xlab("Weekly Count") +
+  ylab("Percent Positive") +
+  ggtitle("Last 4 Weeks for Counties with >5% Positive Tests") +
+  scale_x_log10()
+```
+
+```{r}
+co_week4_pct5l <- left_join(
+    hdt_co_clean,
+    hdt_clean_pct %>%
+      rename(county = "geo_name"),
+    by = c("fips","geo_type","county","pop_2018","count_type")) %>% 
+    filter(count_type == "case",
+           weeknum <= 4,
+           maxpospct < 5,
+           maxcount > 10)
+           
+```
+
+```{r warning=FALSE}
+ggplot(co_week4_pct5l %>%
+         mutate(HighCase = (curcount < 10))) +
+  aes(weekly, pct_pos, col = HighCase, group = county, label = weeknum) +
+  geom_hline(yintercept = 0, col = "grey") +
+  geom_path() +
+  geom_text() +
+  facet_wrap(~ herc_region, scales = "free") +
+  theme(legend.position = "none") +
+  xlab("Weekly Count") +
+  ylab("Percent Positive") +
+  ggtitle("Last 4 Weeks for Counties with >10 Confirmed Cases") +
+  scale_x_log10()
+```
+
+```{r}
+co_week4_pct5b <- left_join(
+    hdt_co_clean,
+    hdt_clean_pct %>%
+      rename(county = "geo_name"),
+    by = c("fips","geo_type","county","pop_2018","count_type")) %>% 
+    filter(count_type == "case",
+           weeknum <= 4,
+           maxpospct >= 5 | (maxpospct < 5 & maxcount > 10))
+```
+
+```{r warning=FALSE}
+ggplot(co_week4_pct5b %>%
+         mutate(HighPct = factor((curpospct >= 5) + 2 * (curpospct < 5 & curcount >= 10)))) +
+  aes(weekly, pct_pos, col = HighPct, group = county, label = weeknum) +
+  geom_hline(yintercept = 0, col = "grey") +
+  geom_path() +
+  geom_text() +
+  facet_wrap(~ herc_region, scales = "free") +
+  theme(legend.position = "none") +
+  xlab("Weekly Count") +
+  ylab("Percent Positive") +
+  ggtitle("Last 4 Weeks for Counties with >5% Positive or >10 Confirmed Cases") +
+  scale_x_log10()
+```
+
+```{r}
+co_week4_pct5b %>%
+  filter(count_type == "case") %>%
+  select(county, weeknum, weekly, pct_pos, herc_region) %>%
+  rename(case = "weekly", pct = "pct_pos") %>%
+  pivot_wider(id_cols = c("county","herc_region"),
+              values_from = c("case", "pct"),
+              names_from = "weeknum") %>%
+  arrange(herc_region, desc(pct_1)) %>%
+  filter(pct_1 >= 5 | (pct_1 < 5 & case_1 >= 10)) %>%
+  knitr::kable()
+```
