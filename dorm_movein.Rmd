@@ -19,8 +19,10 @@ kprint <- function(x) {
 }
 ```
 
+### Testing for all Residents
+
 ```{r}
-move <- read_csv("data/Housing Students Test Results_09012020.csv", 
+move_all <- read_csv("data/Housing Students Test Results_09012020.csv", 
                  col_types = cols(QuarantineNotes = col_character())) %>%
   rename(TracedDate = "Traced Date",
          NumberContacts = "Number of Contacts",
@@ -29,23 +31,63 @@ move <- read_csv("data/Housing Students Test Results_09012020.csv",
   mutate(ResultDate = as.POSIXct(ResultDate, format = "%m/%d/%y"),
          TracedDate = as.POSIXct(TracedDate, format = "%m/%d/%y"),
          SymptomaticDate = as.POSIXct(SymptomaticDate, format = "%m/%d/%y"))
+nstud <- nrow(distinct(move_all, NEWID))
 ```
 
-There are `r nrow(distinct(move, NEWID))` students reported in housing with the following distribution of repeats:
+This includes testing before move-in week as well as testing during that period
+between `r min(move_all$ResultDate)` and `r max(move_all$ResultDate)`.
+
+There are `r nstud` students reported in housing with the following distribution of repeats:
 
 ```{r}
-move %>%
+move_all %>%
   count(NEWID, name = "repeats") %>%
   count(repeats) %>%
   kprint()
 ```
 
 ```{r}
-move <- move %>%
-  filter(ResultDate >= as.POSIXct("2020-08-25") & ResultDate <= as.POSIXct("2020-09-01"))
+tmp <- move_all %>% 
+  filter(Result == "Positive") %>%
+  count(NEWID, name = "repeats") %>% 
+  count(repeats, name = "Positive")
 ```
 
-Of these, `r nrow(distinct(move, NEWID))` got tested during move-in. They have the following distribution of repeats during move-in week:
+There were `r sum(tmp$Positive)` students (`r round(100 * sum(tmp$Positive) / nstud, 2)`%) who tested positive with the following frequency:
+
+```{r}
+tmp %>%
+  kprint()
+```
+
+Here is the breakdown of repeats by number of positive results per student:
+
+```{r}
+(tmp <- move_all %>% 
+  count(NEWID, ResidenceHall, Result) %>%
+  pivot_wider(names_from = "Result", values_from = "n", values_fill = 0) %>%
+  count(Negative, Positive) %>%
+  rename(repeats = "Negative") %>%
+  mutate(repeats = Positive + repeats,
+         Positive = paste0(Positive, "_Positive")) %>%
+  pivot_wider(names_from = "Positive", values_from = "n", values_fill = 0)) %>%
+  kprint()
+```
+
+Thus, there were `r sum(tmp[-1,-1])` students (`r round(100* sum(tmp[-1,-1]) / sum(tmp[,-1]), 2)`%) who had repeat tests, with `r sum(tmp[-1, "0_Positive"])` of those (`r round(100* sum(tmp[-1,"0_Positive"]) / sum(tmp[,-1]), 2)`%) having no positive results. **With this small a percentage of repeats, they do not substantially affect results.**
+
+### Testing only during Move-In Week
+
+```{r}
+move <- move_all %>%
+  filter(ResultDate >= as.POSIXct("2020-08-25") & ResultDate <= as.POSIXct("2020-09-01"))
+nstud_in <- nrow(distinct(move, NEWID))
+```
+
+Now we restrict attention to student tests during move-in week,
+between `r min(move$ResultDate)` and `r max(move$ResultDate)`.
+
+Of the `r nstud` students with records in residence halls, `r nstud_in` got tested during move-in (`r round(100 * nstud_in / nstud, 2)`%). They have the following distribution of repeats during move-in week:
 
 ```{r}
 move %>%
@@ -61,7 +103,7 @@ tmp <- move %>%
   count(repeats, name = "Positive")
 ```
 
-There were `r sum(tmp$Positive)` students who tested positive with the following frequency:
+There were `r sum(tmp$Positive)` students (`r round(100 * sum(tmp$Positive) / nrow(distinct(move, NEWID)), 2)`%) who tested positive with the following frequency:
 
 ```{r}
 tmp %>%
@@ -84,7 +126,7 @@ Here is the breakdown of repeats by number of positive results per student:
 
 Thus, there were `r sum(tmp[-1,-1])` students (`r round(100* sum(tmp[-1,-1]) / sum(tmp[,-1]), 2)`%) who had repeat tests, with `r sum(tmp[-1, "0_Positive"])` of those (`r round(100* sum(tmp[-1,"0_Positive"]) / sum(tmp[,-1]), 2)`%) having no positive results. **With this small a percentage of repeats, they do not substantially affect results.**
 
-The positive results were recorded at these locations:
+The positive results during move-in week were recorded at these locations:
 
 ```{r}
 move %>%
@@ -94,10 +136,13 @@ move %>%
   kprint()
 ```
 
+### Contacts and Residence Halls
+
+Here we return to all students tested between `r min(move_all$ResultDate)` and `r max(move_all$ResultDate)`.
 The following table shows how many students provided a given number of contacts, separated by result status:
 
 ```{r}
-move %>%
+move_all %>%
   group_by(NEWID) %>%
   summarize(NumberContacts = sum(NumberContacts),
             Positive = c("All_Negative", "Positive")[1 + any(Result == "Positive")]) %>%
@@ -109,10 +154,19 @@ move %>%
   kprint()
 ```
 
+The following cases had symptoms identified:
+
+```{r}
+move_all %>%
+  filter(!is.na(HasSymptoms) & HasSymptoms) %>%
+  select(Result, ResidenceHall, QuarantineStatus, SymptomaticDate) %>%
+  kprint()
+```
+
 While the dorm may not seem relevant to disease status yet, here is the breakdown:
 
 ```{r}
-move %>%
+move_all %>%
   group_by(NEWID, ResidenceHall) %>%
   summarize(Positive = c("All_Negative", "Positive")[1 + any(Result == "Positive")]) %>%
   ungroup() %>%
@@ -120,15 +174,6 @@ move %>%
   pivot_wider(names_from = "Positive", values_from = "n", values_fill = 0) %>%
   arrange(desc(Positive), desc(All_Negative)) %>%
   mutate(Pct_Pos_Dorm = round(100 * Positive / (Positive + All_Negative), 2)) %>%
-  kprint()
-```
-
-The following cases had symptoms identified:
-
-```{r}
-move %>%
-  filter(!is.na(HasSymptoms) & HasSymptoms) %>%
-  select(Result, ResidenceHall, QuarantineStatus, SymptomaticDate) %>%
   kprint()
 ```
 
