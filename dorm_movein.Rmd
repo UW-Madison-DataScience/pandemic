@@ -30,7 +30,8 @@ move_all <- read_csv("data/Housing Students Test Results_09012020.csv",
          AdmitType = "Admit Type") %>%
   mutate(ResultDate = as.POSIXct(ResultDate, format = "%m/%d/%y"),
          TracedDate = as.POSIXct(TracedDate, format = "%m/%d/%y"),
-         SymptomaticDate = as.POSIXct(SymptomaticDate, format = "%m/%d/%y"))
+         SymptomaticDate = as.POSIXct(SymptomaticDate, format = "%m/%d/%y"),
+         Result = ifelse(Result %in% c("Negative", "Positive"), Result, "Negative"))
 nstud <- nrow(distinct(move_all, NEWID))
 ```
 
