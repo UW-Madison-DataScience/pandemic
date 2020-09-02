@@ -187,7 +187,7 @@ move_pos <- move_all %>%
   select(NEWID, PosID)
 ```
 
-```{r}
+```{r fig.height = 4, fig.width = 7}
 ggplot(
   full_join(move_pos,
             move_all %>% filter(NEWID %in% move_pos$NEWID),
@@ -202,20 +202,39 @@ ggplot(
 ```{r}
 move_neg <- move_all %>% 
   filter(!(NEWID %in% move_pos$NEWID)) %>%
-  count(NEWID) %>%
-  filter(n > 1)
+  group_by(NEWID) %>%
+  summarize(repeats = n(),
+            minDate = min(ResultDate),
+            maxDate = max(ResultDate)) %>%
+  ungroup() %>%
+  filter(repeats > 1) %>%
+  arrange(repeats, minDate, maxDate) %>%
+  mutate(many = c("2 tests", "more tests")[1 + (repeats > 2)],
+         repeats = factor(repeats)) %>%
+  group_by(many) %>%
+  mutate(row = row_number()) %>%
+  ungroup()
 ```
 
 ```{r}
+move_neg %>%
+  count(repeats, name = "frequency") %>%
+  kprint()
+```
+
+```{r fig.height = 4, fig.width = 7}
 ggplot(
-  move_all %>% 
-    filter(NEWID %in% move_neg$NEWID) %>%
-    mutate(NEWID = rank(NEWID))) +
-  aes(ResultDate, NEWID, col = Result, group = NEWID) +
+  left_join(
+    move_all %>% 
+      filter(NEWID %in% move_neg$NEWID),
+    move_neg,
+    by = "NEWID")) +
+  aes(ResultDate, row, col = repeats, group = NEWID) +
   geom_point() +
   geom_path()+
   ggtitle("Students with no Positive and multiple Negative Tests") +
-  ylab("")
+  ylab("") +
+  facet_wrap(~ many, scale = "free")
 ```
 
 
