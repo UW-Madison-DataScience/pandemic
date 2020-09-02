@@ -178,4 +178,44 @@ move_all %>%
   kprint()
 ```
 
+### Graphs
+
+```{r}
+move_pos <- move_all %>%
+  filter(Result == "Positive") %>%
+  mutate(PosID = rank(jitter(as.numeric(ResultDate)))) %>%
+  select(NEWID, PosID)
+```
+
+```{r}
+ggplot(
+  full_join(move_pos,
+            move_all %>% filter(NEWID %in% move_pos$NEWID),
+            by = "NEWID")) +
+  aes(ResultDate, PosID, col = Result, group = NEWID) +
+  geom_point() +
+  geom_path() +
+  ggtitle("Students with a Positive Test") +
+  ylab("")
+```
+
+```{r}
+move_neg <- move_all %>% 
+  filter(!(NEWID %in% move_pos$NEWID)) %>%
+  count(NEWID) %>%
+  filter(n > 1)
+```
+
+```{r}
+ggplot(
+  move_all %>% 
+    filter(NEWID %in% move_neg$NEWID) %>%
+    mutate(NEWID = rank(NEWID))) +
+  aes(ResultDate, NEWID, col = Result, group = NEWID) +
+  geom_point() +
+  geom_path()+
+  ggtitle("Students with no Positive and multiple Negative Tests") +
+  ylab("")
+```
+
 
