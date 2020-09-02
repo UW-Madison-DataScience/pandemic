@@ -21,6 +21,8 @@ kprint <- function(x) {
 
 ### Wisconsin Historical Testing Data by County
 
+This was an early attempt to gather useful deata. See instead `wi_bet_new_data.Rmd`.
+
 The data are published daily at <https://data.dhsgis.wi.gov/datasets/covid-19-historical-data-table/data>.
 There is manual download of CSV or automated API access. For now using manual download. For the whole state and each county, we get total positive and negative tests. For the state, we get the number of positives by 10-year age groups, but not the number of negative by age group.
 

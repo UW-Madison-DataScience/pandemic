@@ -1,5 +1,6 @@
 ---
-title: "Adjusted positivity"
+title: "Adjusted Positivity"
+author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
 output:
   pdf_document: default
   html_document: default
@@ -28,9 +29,12 @@ library(boot)
 library(readxl)
 ```
 
+This work is a collaboration of Brian Yandell, Dorte Dopfer and Juan Francisco Mandujano Reyes.
+
 ### Wisconsin Historical Testing Data by County for 18-29 age group
 
 Loading the data from Wisconsin Electronic Disease Surveillance System. Number of young adults with confirmed cases of COVID-19 and number tested for COVID-19 using diagnostic RNA test from June 1st to August 17th.
+
 ```{r}
 data_WI <- read_excel("data/Number of confirmed cases and people tested among young adults - for UW - 18Aug2020.xlsx", sheet = 2, skip = 4, .name_repair = "minimal", na = c("","."))
 data_WI[is.na(data_WI)] <- 0
@@ -41,6 +45,7 @@ names(data_WI) <- c("COUNTY", "POSITIVE", "TOTAL_TESTS")
 data_WI <- data_WI %>%
   mutate(POSITIVE = ifelse(is.na(POSITIVE), 0, POSITIVE))
 ```
+
 Using an approach from Quantitative Microbial Risk Assessment (QMRA), we simulate 1000 observations of a Beta distribution with parameters  a = POSITIVE + 1 and b = TOTAL_TESTS - POSITIVE + 1. 
 In tables below, the `_pos` values are percent positive cases, and `_st_pos` are expected number of positive students per county.
 
@@ -196,8 +201,15 @@ Below are some technical remarks:
 - Be careful with county level data for students, because they might become identifiable.
 - Calculate number of positives for all counties and all arriving states, but we know that this data might not be available for all states and counties (see Florida example).
 
+### The Math
+
+Let $p$ be the probability that an individual is positive for COVID-19, possibly indexed by county $c$ ($p_c$). Here, we only consider one age group (18-29). This probability varies over time, but we consider just one time point. In a county with $P_c$ positives out of $T_c$ total tests, the straightforward estimate is $\hat{p}_c = P_c/T_c$. However, in counties with few observations, this may not be very accurate. A useful alternative is to suppose, without data, that $p$ could be anything, or uniform between 0 and 1. With this _prior_, the adjusted estimator would be the posterior probability $\tilde{p}_c = (P_c+1)/(T_c+2)$. Note that with little data, these values will shrink toward 1/2, but with much data, the value is essentially unchanged.
+
+With a few assumptions (tests are independent, and every youth in a county has the same chance of being positive, without other information), then the distribution of $p_c$ given data ($P_c,T_c$) has a distribution of $Beta(P_c+1,T_c-P_C+1)$. We can examine this distribution to get at variability in the estimate, which is done above to get 95% credible interval using 1000 bootstrap samples of 1000 draws from the Beta distribution for each county, giving us the `lower` and `upper` limits.
+
+These estimates of positivity, which are averages over about a 2.5 month period, are much higher than the estimates found in Moon Duchin's tool <https://mggg.github.io/estimate-incoming/>, and higher than the testing rates being observed in Dane County recently (~2%). One reason for that is that the WI DHS records include only one measurement per individual, even though a person may take multiple tests. A person is recorded as positive only once if at all.
+
 ### References
 
 - Quantitative Microbial Risk Assessment (QMRA) by Vose et al 2003, 2009
 - <https://pdfs.semanticscholar.org/b6ed/2712a4b34cf6ad30a940156a91095d536692.pdf>
-

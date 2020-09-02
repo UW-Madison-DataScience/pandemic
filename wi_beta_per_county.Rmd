@@ -1,5 +1,6 @@
 ---
 title: "Adjusted positivity"
+author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
 output: html_document
 ---
 
@@ -23,10 +24,15 @@ library(data.table)
 library(simpleboot)
 ```
 
+This work is a collaboration of Brian Yandell, Dorte Dopfer and Juan Francisco Mandujano Reyes.
+
 ### Wisconsin Historical Testing Data by County
+
+This was an earlier attempt in which we did not have age-specific information by county. Instead, we used the overall data and attempted to adjust based on age distribution in state from Census. This has code for pulling data from JSON API. See instead file `wi_beta_new_data.Rmd`.
 
 The data are published daily at <https://data.dhsgis.wi.gov/datasets/covid-19-historical-data-table/data>.
 There is manual download of CSV or automated API access. The first part of the code translates the JSON file from API to a data frame. For the whole state and each county, we get total positive and negative tests. For the state, we get the number of positives by 10-year age groups, but not the number of negative by age group.
+
 ```{r}
 jsonResponse <- GET("https://opendata.arcgis.com/datasets/b913e9591eae4912b33dc5b4e88646c5_10.geojson")
 jsonResponseText <- content(jsonResponse, as = "text")

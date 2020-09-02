@@ -1,0 +1,135 @@
+---
+title: "Housing Move-In"
+author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+```{r}
+library(tidyverse)
+kprint <- function(x) {
+  if(interactive()) {
+    print(x)
+  } else {
+    knitr::kable(x)
+  }
+}
+```
+
+```{r}
+move <- read_csv("data/Housing Students Test Results_09012020.csv", 
+                 col_types = cols(QuarantineNotes = col_character())) %>%
+  rename(TracedDate = "Traced Date",
+         NumberContacts = "Number of Contacts",
+         ResidenceHall = "Residence Hall",
+         AdmitType = "Admit Type") %>%
+  mutate(ResultDate = as.POSIXct(ResultDate, format = "%m/%d/%y"),
+         TracedDate = as.POSIXct(TracedDate, format = "%m/%d/%y"),
+         SymptomaticDate = as.POSIXct(SymptomaticDate, format = "%m/%d/%y"))
+```
+
+There are `r nrow(distinct(move, NEWID))` students reported in housing with the following distribution of repeats:
+
+```{r}
+move %>%
+  count(NEWID, name = "repeats") %>%
+  count(repeats) %>%
+  kprint()
+```
+
+```{r}
+move <- move %>%
+  filter(ResultDate >= as.POSIXct("2020-08-25") & ResultDate <= as.POSIXct("2020-09-01"))
+```
+
+Of these, `r nrow(distinct(move, NEWID))` got tested during move-in. They have the following distribution of repeats during move-in week:
+
+```{r}
+move %>%
+  count(NEWID, name = "repeats") %>%
+  count(repeats) %>%
+  kprint()
+```
+
+```{r}
+tmp <- move %>% 
+  filter(Result == "Positive") %>%
+  count(NEWID, name = "repeats") %>% 
+  count(repeats, name = "Positive")
+```
+
+There were `r sum(tmp$Positive)` students who tested positive with the following frequency:
+
+```{r}
+tmp %>%
+  kprint()
+```
+
+Here is the breakdown of repeats by number of positive results per student:
+
+```{r}
+(tmp <- move %>% 
+  count(NEWID, ResidenceHall, Result) %>%
+  pivot_wider(names_from = "Result", values_from = "n", values_fill = 0) %>%
+  count(Negative, Positive) %>%
+  rename(repeats = "Negative") %>%
+  mutate(repeats = Positive + repeats,
+         Positive = paste0(Positive, "_Positive")) %>%
+  pivot_wider(names_from = "Positive", values_from = "n", values_fill = 0)) %>%
+  kprint()
+```
+
+Thus, there were `r sum(tmp[-1,-1])` students (`r round(100* sum(tmp[-1,-1]) / sum(tmp[,-1]), 2)`%) who had repeat tests, with `r sum(tmp[-1, "0_Positive"])` of those (`r round(100* sum(tmp[-1,"0_Positive"]) / sum(tmp[,-1]), 2)`%) having no positive results. **With this small a percentage of repeats, they do not substantially affect results.**
+
+The positive results were recorded at these locations:
+
+```{r}
+move %>%
+  filter(Result == "Positive") %>%
+  count(LocationName, AdmitType) %>%
+  pivot_wider(names_from = "AdmitType", values_from = "n") %>%
+  kprint()
+```
+
+The following table shows how many students provided a given number of contacts, separated by result status:
+
+```{r}
+move %>%
+  group_by(NEWID) %>%
+  summarize(NumberContacts = sum(NumberContacts),
+            Positive = c("All_Negative", "Positive")[1 + any(Result == "Positive")]) %>%
+  ungroup() %>%
+  count(Positive, NumberContacts) %>%
+  filter(NumberContacts > 0) %>%
+  pivot_wider(names_from = "Positive", values_from = "n", values_fill = 0) %>%
+  arrange(NumberContacts) %>%
+  kprint()
+```
+
+While the dorm may not seem relevant to disease status yet, here is the breakdown:
+
+```{r}
+move %>%
+  group_by(NEWID, ResidenceHall) %>%
+  summarize(Positive = c("All_Negative", "Positive")[1 + any(Result == "Positive")]) %>%
+  ungroup() %>%
+  count(ResidenceHall, Positive) %>%
+  pivot_wider(names_from = "Positive", values_from = "n", values_fill = 0) %>%
+  arrange(desc(Positive), desc(All_Negative)) %>%
+  mutate(Pct_Pos_Dorm = round(100 * Positive / (Positive + All_Negative), 2)) %>%
+  kprint()
+```
+
+The following cases had symptoms identified:
+
+```{r}
+move %>%
+  filter(!is.na(HasSymptoms) & HasSymptoms) %>%
+  select(Result, ResidenceHall, QuarantineStatus, SymptomaticDate) %>%
+  kprint()
+```
+
+
