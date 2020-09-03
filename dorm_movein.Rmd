@@ -5,7 +5,8 @@ output: word_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.height = 4, fig.width = 7)
 ```
 
 ```{r}
@@ -167,14 +168,14 @@ move_all %>%
 While the dorm may not seem relevant to disease status yet, here is the breakdown:
 
 ```{r}
-move_all %>%
+(dorm_all <- move_all %>%
   group_by(NEWID, ResidenceHall) %>%
   summarize(Positive = c("All_Negative", "Positive")[1 + any(Result == "Positive")]) %>%
   ungroup() %>%
   count(ResidenceHall, Positive) %>%
   pivot_wider(names_from = "Positive", values_from = "n", values_fill = 0) %>%
   arrange(desc(Positive), desc(All_Negative)) %>%
-  mutate(Pct_Pos_Dorm = round(100 * Positive / (Positive + All_Negative), 2)) %>%
+  mutate(Pct_Pos_Dorm = round(100 * Positive / (Positive + All_Negative), 2))) %>%
   kprint()
 ```
 
@@ -187,7 +188,7 @@ move_pos <- move_all %>%
   select(NEWID, PosID)
 ```
 
-```{r fig.height = 4, fig.width = 7}
+```{r}
 ggplot(
   full_join(move_pos,
             move_all %>% filter(NEWID %in% move_pos$NEWID),
@@ -222,7 +223,7 @@ move_neg %>%
   kprint()
 ```
 
-```{r fig.height = 4, fig.width = 7}
+```{r}
 ggplot(
   left_join(
     move_all %>% 
@@ -235,6 +236,37 @@ ggplot(
   ggtitle("Students with no Positive and multiple Negative Tests") +
   ylab("") +
   facet_wrap(~ many, scale = "free")
+```
+
+Look at cross-section
+
+```{r}
+dorm_none <- (
+  dorm_all %>%
+    filter(Positive == 0))$ResidenceHall
+tmp <- move_all %>%
+  filter(!(ResidenceHall %in% dorm_none)) %>%
+  group_by(ResultDate, ResidenceHall) %>%
+  summarize(Positive = sum(Result == "Positive"),
+            Total = Positive + sum(Result == "Negative")) %>%
+  ungroup %>%
+  group_by(ResidenceHall) %>%
+  mutate(Positive = cumsum(Positive),
+         Total = cumsum(Total)) %>%
+  ungroup %>%
+  mutate(PercentPos = 100 * Positive / Total)
+```
+
+```{r}
+ggplot(tmp) +
+  aes(ResultDate, Positive, col = ResidenceHall) +
+  geom_line()
+```
+
+```{r}
+ggplot(tmp) +
+  aes(ResultDate, PercentPos, col = ResidenceHall) +
+  geom_line()
 ```
 
 
