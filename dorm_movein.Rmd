@@ -11,6 +11,11 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
 
 ```{r}
 library(tidyverse)
+library(RcppRoll)
+roll7 <- function(x) {
+  x <- roll_mean(x, 7)
+  c(rep(x[1], 6), x)
+}
 kprint <- function(x) {
   if(interactive()) {
     print(x)
@@ -19,6 +24,8 @@ kprint <- function(x) {
   }
 }
 ```
+
+This document summarizes housing student test results through 1 September 2020. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/dorm_movein.Rmd).
 
 ### Testing for all Residents
 
@@ -244,29 +251,48 @@ Look at cross-section
 dorm_none <- (
   dorm_all %>%
     filter(Positive == 0))$ResidenceHall
-tmp <- move_all %>%
+dorm_date <- move_all %>%
   filter(!(ResidenceHall %in% dorm_none)) %>%
   group_by(ResultDate, ResidenceHall) %>%
   summarize(Positive = sum(Result == "Positive"),
             Total = Positive + sum(Result == "Negative")) %>%
   ungroup %>%
+  mutate(PercentPos = 100 * roll7(Positive) / roll7(Total)) %>%
   group_by(ResidenceHall) %>%
   mutate(Positive = cumsum(Positive),
          Total = cumsum(Total)) %>%
+  ungroup
+tmp <- move_all %>%
+  filter(!(ResidenceHall %in% dorm_none)) %>%
+  group_by(ResultDate) %>%
+  summarize(Positive = sum(Result == "Positive"),
+            Total = Positive + sum(Result == "Negative")) %>%
   ungroup %>%
-  mutate(PercentPos = 100 * Positive / Total)
+  mutate(PercentPos = 100 * roll7(Positive) / roll7(Total),
+         Positive = cumsum(Positive),
+         Total = cumsum(Total)) %>%
+  mutate(ResidenceHall = "Overall")
+dorm_date <-
+  bind_rows(
+    dorm_date,
+    tmp) %>%
+  mutate(Overall = c("By Residence Hall", "Overall")[1 + (ResidenceHall == "Overall")])
 ```
 
 ```{r}
-ggplot(tmp) +
+ggplot(dorm_date) +
   aes(ResultDate, Positive, col = ResidenceHall) +
-  geom_line()
+  geom_line(size = 2) +
+  facet_wrap(~ Overall, scale = "free_y") +
+  ggtitle("Number Positive Students on Campus")
 ```
 
 ```{r}
-ggplot(tmp) +
+ggplot(dorm_date) +
   aes(ResultDate, PercentPos, col = ResidenceHall) +
-  geom_line()
+  geom_line(size = 2) +
+  facet_wrap(~ Overall, scale = "free_y") +
+  ggtitle("Percent Positive Students on Campus (7-day rolling mean)")
 ```
 
 
