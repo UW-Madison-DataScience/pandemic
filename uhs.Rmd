@@ -5,7 +5,8 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.height = 3, fig.width = 7)
 ```
 
 ```{r}
@@ -16,11 +17,13 @@ library(RcppRoll)
 ```
 
 ```{r eval=FALSE}
-drive_auth("byandell@wisc.edu") do this once to authorize within google drive
+# do this once to authorize within google drive
+drive_auth("byandell@wisc.edu")
 gs4_auth(token = drive_token())
 ```
 
 ```{r eval=FALSE}
+# do this once to authorize within google sheets
 gs4_auth(email = "byandell@wisc.edu",
          scopes = "https://www.googleapis.com/auth/spreadsheets.readonly")
 ```
@@ -32,13 +35,16 @@ roll7 <- function(x) {
 }
 uhs <- scan("data/uhs.txt", "char")
 uhs <- read_sheet(uhs,
-                  sheet = "COVID-data") %>%
+                  sheet = "COVID-data")
+uhs <- uhs %>%
+  select(Date_of_results:Facstaff_positives) %>%
   rename(
     Date = "Date_of_results",
     student_total = "Student_total_tests",
     student_positive = "Student_positives",
     facstaff_total = "Facstaff_total_tests",
     facstaff_positive = "Facstaff_positives") %>%
+  filter(!is.na(student_total)) %>%
   mutate(Date = as.POSIXct(Date)) %>%
   pivot_longer(student_total:facstaff_positive, names_to = "group", values_to = "value") %>%
   mutate(count_type = str_remove(group, ".*_"),
