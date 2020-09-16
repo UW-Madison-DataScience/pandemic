@@ -1,12 +1,12 @@
 ---
-title: "Quarantine"
+title: "DRAFT Quarantine Summary"
 author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
 output: word_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
-                      fig.height = 3, fig.width = 7)
+                      fig.height = 2.75, fig.width = 7)
 ```
 
 ```{r}
@@ -69,47 +69,7 @@ quar %>%
   select(sheet, Date.Added, Test.Date, delay)
 ```
 
-```{r}
-ggplot(quar %>% filter(sheet != "Exempt")) +
-  aes(Date.Added, Test.Date - Date.Added, col = sheet) +
-  geom_smooth(method = "lm", se = FALSE) +
-  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
-  ylab("Delay in days") +
-  geom_jitter(alpha = 0.65, size = 2) +
-  ggtitle("Delay between Date Added and Test Date")
-```
-
-
-```{r}
-ggplot(quar %>% filter(sheet != "Exempt", !is.na(Exposed))) +
-  aes(Date.Added, Date.Added - Exposed, col = sheet) +
-  geom_smooth(method = "lm", se = FALSE) +
-  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
-  ylab("Delay in days") +
-  geom_jitter(alpha = 0.65, size = 2) +
-  ggtitle("Delay between Exposure and Date Added")
-```
-
-```{r}
-ggplot(quar %>% filter(sheet != "Exempt", !is.na(Exposed))) +
-  aes(Test.Date, Test.Date - Exposed, col = sheet) +
-  geom_smooth(method = "lm", se = FALSE) +
-  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
-  ylab("Delay in days") +
-  geom_jitter(alpha = 0.65, size = 2) +
-  ggtitle("Delay between Exposure and Test Date")
-```
-
-```{r}
-ggplot(quar %>% filter(sheet != "Exempt", )) +
-  aes(Date.Added, Anticipated.Return.to.Housing - Date.Added, col = sheet) +
-  geom_smooth(method = "lm", se = FALSE) +
-  geom_jitter(alpha = 0.65, size = 2) +
-  ylab("Length in days") +
-  ggtitle("Length of Anticipated Quarantine from Date Added")
-```
-
-### Quarantine Counts over Time
+## Quarantine Counts over Time
 
 ```{r}
 quart <- quar %>%
@@ -121,14 +81,16 @@ quart <- quar %>%
 
 ```{r}
 quar_date <- quart %>%
-  filter(sheet != "Exempt") %>%
   group_by(Date, sheet) %>%
   summarize(Exposed = sum(State == "Exposed"),
-            Quarantined = sum(State == "Date.Added") - sum(State == "Anticipated.Return.to.Housing")) %>%
+            Quarantined = sum(State == "Date.Added") -
+              sum(State == "Anticipated.Return.to.Housing"),
+            Exempt = sum(State == "Date.Added")) %>%
   ungroup %>%
   group_by(sheet) %>%
   mutate(cumExposed = cumsum(Exposed),
-         cumQuarantined = cumsum(Quarantined)) %>%
+         cumQuarantined = cumsum(Quarantined),
+         cumExempt = sum(Exempt) - cumsum(Exempt)) %>%
   ungroup
 tmp <- quart %>%
   filter(sheet != "Exempt") %>%
@@ -148,7 +110,7 @@ quar_date <-
 ```
 
 ```{r}
-ggplot(quar_date %>% filter(sheet != "Isolation")) +
+ggplot(quar_date %>% filter(!(sheet %in% c("Isolation","Exempt")))) +
   aes(Date, cumExposed, col = sheet) +
   geom_line(size = 2) +
   facet_wrap(~ Overall, scale = "free_y") +
@@ -157,7 +119,7 @@ ggplot(quar_date %>% filter(sheet != "Isolation")) +
 ```
 
 ```{r}
-ggplot(quar_date) +
+ggplot(quar_date %>% filter(sheet != "Exempt")) +
   aes(Date, cumQuarantined, col = sheet) +
   geom_line(size = 2) +
   facet_wrap(~ Overall, scale = "free_y") +
@@ -165,7 +127,81 @@ ggplot(quar_date) +
   ggtitle("Number of Dorm Students in Quarantine or Isolation")
 ```
 
-### Quarantine and Isolation Student Timeline
+```{r}
+ggplot(quar_date %>% filter(sheet == "Exempt")) +
+  aes(Date, cumExempt, col = sheet) +
+  geom_line(size = 2) +
+  facet_wrap(~ Overall, scale = "free_y") +
+  theme(legend.position = "none") +
+  ylab("Exempt") +
+  ggtitle("Number Exempt due to Prior Infection")
+```
+
+## Delays
+
+```{r}
+ggplot(
+  quar %>% 
+    filter(sheet != "Exempt",
+           !is.na(Test.Date))) +
+  aes(Date.Added, Test.Date - Date.Added, col = sheet) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
+  ylab("Delay in days") +
+  geom_jitter(alpha = 0.65, size = 2) +
+  ggtitle("Delay between Date Added and Test Date")
+```
+
+
+```{r}
+ggplot(
+  quar %>% 
+    filter(sheet != "Exempt", 
+           !is.na(Exposed))) +
+  aes(Date.Added, Date.Added - Exposed, col = sheet) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
+  ylab("Delay in days") +
+  geom_jitter(alpha = 0.65, size = 2) +
+  ggtitle("Delay between Exposure and Date Added")
+```
+
+```{r}
+ggplot(
+  quar %>% 
+    filter(sheet != "Exempt", 
+           !is.na(Exposed),
+           !is.na(Test.Date))) +
+  aes(Test.Date, Test.Date - Exposed, col = sheet) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
+  ylab("Delay in days") +
+  geom_jitter(alpha = 0.65, size = 2) +
+  ggtitle("Delay between Exposure and Test Date")
+```
+
+## Length of Stay in Quarantine or Isolation
+
+```{r fig.height = 6}
+ggplot(quar %>% filter(sheet != "Exempt", )) +
+  aes(Date.Added, Anticipated.Return.to.Housing - Date.Added, col = sheet) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_jitter(alpha = 0.65, size = 2) +
+  ylab("Length in days") +
+  ggtitle("Length of Anticipated Stay from Date Added")
+```
+
+\newpage
+
+## Quarantine and Isolation Student Timeline
+
+```{r}
+quart <- quart %>%
+  mutate(State = factor(State, c("Exposed", "Test.Date", "Date.Added", 
+                                 "Day.4.Test", "Day.8.Test",
+                                 "Anticipated.Return.to.Housing",
+                                 "Exempt")))
+```
 
 ```{r}
 exposed <- sort((
