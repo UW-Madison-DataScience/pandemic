@@ -1,0 +1,227 @@
+---
+title: "Quarantine"
+author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.height = 3, fig.width = 7)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+quar_sheets <- as.list(excel_sheets("data/De-identified Roster.xlsx"))
+# Exempt had no column names. Added by hand.
+quar_read <- function(sheet, col_types = NULL) {
+  out <- read_excel("data/De-identified Roster.xlsx", sheet = sheet)
+  col_types <- c(col_types, rep("text", ncol(out) - length(col_types)))
+  out <- read_excel("data/De-identified Roster.xlsx", sheet = sheet, 
+                    col_types = col_types, .name_repair = "minimal")
+  out <- out[, names(out) != ""]
+  names(out) <- make.names(names(out))
+  out
+}
+```
+
+```{r}
+quar <- list()
+quar$Isolation <- quar_read("Isolation",
+                            col_types = c(rep("date",3),rep("text",2))) %>%
+  rename(Anticipated.Return.to.Housing = "Anticipated.D.C")
+quar$Exempt <- read_excel("data/De-identified Roster.xlsx", sheet = "Exempt", 
+                          col_names = FALSE, col_types = "date") %>%
+  select(4)
+names(quar$Exempt)[1] <- names(quar$Isolation)[1]
+quar$Quarantine <- quar_read("Quarantine",
+                            col_types = c(rep("date",5),rep("text",4))) %>%
+  select(1:9)
+quar$Transfer <- quar_read("Quarantine to Isolation",
+                            col_types = c(rep("date",4),rep("text",4))) %>%
+  select(1:8)
+quar <- quar %>%
+  bind_rows(.id = "sheet") %>%
+  mutate(Date.Added = as.Date(Date.Added),
+         Test.Date = as.Date(Test.Date),
+         Exposed = as.Date(Exposed),
+         Anticipated.Return.to.Housing = as.Date(Anticipated.Return.to.Housing),
+         Day.4.Test = as.Date(Day.4.Test),
+         Day.8.Test = as.Date(Day.8.Test)) %>%
+  filter(!(is.na(Date.Added) | Date.Added < as.Date("2020-01-01")))
+tmp <- which(quar$Anticipated.Return.to.Housing < "2020-01-01")
+quar$Anticipated.Return.to.Housing[tmp] <- as.Date(NA)
+```
+
+```{r eval=FALSE}
+quar %>%
+  count(sheet, Date.Added) %>%
+  pivot_wider(names_from = "sheet", values_from = "n") %>%
+  arrange(Date.Added)
+```
+
+```{r eval=FALSE}
+quar %>%
+  mutate(delay = as.numeric(Test.Date - Date.Added)) %>%
+  select(sheet, Date.Added, Test.Date, delay)
+```
+
+```{r}
+ggplot(quar %>% filter(sheet != "Exempt")) +
+  aes(Date.Added, Test.Date - Date.Added, col = sheet) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
+  ylab("Delay in days") +
+  geom_jitter(alpha = 0.65, size = 2) +
+  ggtitle("Delay between Date Added and Test Date")
+```
+
+
+```{r}
+ggplot(quar %>% filter(sheet != "Exempt", !is.na(Exposed))) +
+  aes(Date.Added, Date.Added - Exposed, col = sheet) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
+  ylab("Delay in days") +
+  geom_jitter(alpha = 0.65, size = 2) +
+  ggtitle("Delay between Exposure and Date Added")
+```
+
+```{r}
+ggplot(quar %>% filter(sheet != "Exempt", !is.na(Exposed))) +
+  aes(Test.Date, Test.Date - Exposed, col = sheet) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_hline(yintercept = 0, col = "darkgray", size = 2) +
+  ylab("Delay in days") +
+  geom_jitter(alpha = 0.65, size = 2) +
+  ggtitle("Delay between Exposure and Test Date")
+```
+
+```{r}
+ggplot(quar %>% filter(sheet != "Exempt", )) +
+  aes(Date.Added, Anticipated.Return.to.Housing - Date.Added, col = sheet) +
+  geom_smooth(method = "lm", se = FALSE) +
+  geom_jitter(alpha = 0.65, size = 2) +
+  ylab("Length in days") +
+  ggtitle("Length of Anticipated Quarantine from Date Added")
+```
+
+### Quarantine Counts over Time
+
+```{r}
+quart <- quar %>%
+  select(Exposed, Date.Added:Test.Date,Day.4.Test:Day.8.Test,sheet) %>%
+  mutate(ID = rank(Date.Added, ties.method = "random")) %>%
+  pivot_longer(Exposed:Day.8.Test, names_to = "State", values_to = "Date") %>%
+  filter(!is.na(Date))
+```
+
+```{r}
+quar_date <- quart %>%
+  filter(sheet != "Exempt") %>%
+  group_by(Date, sheet) %>%
+  summarize(Exposed = sum(State == "Exposed"),
+            Quarantined = sum(State == "Date.Added") - sum(State == "Anticipated.Return.to.Housing")) %>%
+  ungroup %>%
+  group_by(sheet) %>%
+  mutate(cumExposed = cumsum(Exposed),
+         cumQuarantined = cumsum(Quarantined)) %>%
+  ungroup
+tmp <- quart %>%
+  filter(sheet != "Exempt") %>%
+  group_by(Date) %>%
+  summarize(Exposed = sum(State == "Exposed"),
+            Quarantined = sum(State == "Date.Added") - sum(State == "Anticipated.Return.to.Housing")) %>%
+  ungroup %>%
+  mutate(cumExposed = cumsum(Exposed),
+         cumQuarantined = cumsum(Quarantined),
+         sheet = "Overall")
+quar_date <-
+  bind_rows(
+    quar_date,
+    tmp) %>%
+  mutate(Overall = c("By Quarantine Type", "Overall")[1 + (sheet == "Overall")])
+
+```
+
+```{r}
+ggplot(quar_date %>% filter(sheet != "Isolation")) +
+  aes(Date, cumExposed, col = sheet) +
+  geom_line(size = 2) +
+  facet_wrap(~ Overall, scale = "free_y") +
+  ylab("Exposed") +
+  ggtitle("Number of Exposed Dorm Students")
+```
+
+```{r}
+ggplot(quar_date) +
+  aes(Date, cumQuarantined, col = sheet) +
+  geom_line(size = 2) +
+  facet_wrap(~ Overall, scale = "free_y") +
+  ylab("Quarantined or Isolated") +
+  ggtitle("Number of Dorm Students in Quarantine or Isolation")
+```
+
+### Quarantine and Isolation Student Timeline
+
+```{r}
+exposed <- sort((
+  quart %>%
+    filter(State == "Exposed"))$ID)
+tested <- sort((
+  quart %>%
+    filter(State == "Test.Date"))$ID)
+tested <- tested[!(tested %in% exposed)]
+IDs <- rep(0, length(unique(quart$ID)))
+IDs[exposed] <- seq_along(exposed)
+IDs[tested] <- seq_along(tested)
+IDs[-c(exposed, tested)] <- seq_len(sum(IDs == 0))
+```
+
+```{r}
+ggplot(
+  quart %>% 
+    filter(ID %in% exposed) %>%
+    mutate(ID = IDs[ID])) +
+  aes(Date, ID, col = State, group = ID) +
+  geom_point() +
+  geom_path() +
+  facet_wrap(~ sheet) +
+  ggtitle("Exposed")
+```
+
+
+```{r}
+ggplot(
+  quart %>% 
+    filter(!(ID %in% exposed),
+           ID %in% tested) %>%
+    mutate(ID = IDs[ID])) +
+  aes(Date, ID, col = State, group = ID) +
+  geom_point() +
+  geom_path() +
+  facet_wrap(~ sheet) +
+  ggtitle("Tested but not Exposed")
+```
+
+
+```{r}
+ggplot(
+  quart %>% 
+    filter(sheet != "Exempt",
+           !(ID %in% exposed),
+           !(ID %in% tested)) %>%
+    mutate(ID = IDs[ID])) +
+  aes(Date, ID, col = State, group = ID) +
+  geom_point() +
+  geom_path() +
+  facet_wrap(~ sheet) +
+  ggtitle("No Known Exposure or Initial Testing")
+```
+
+
+This document summarizes quarantine information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/quarantine.Rmd).
+
