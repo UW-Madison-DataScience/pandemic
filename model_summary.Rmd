@@ -30,11 +30,15 @@ ggplot(paltiel %>% filter(time.to.return.fps.from.isolation == 14,
       group = frequency.screening, 
       col = frequency.screening,
       size = new.infections.per.shock) +
-  facet_grid(. ~ r0) +
+  facet_grid(. ~ r0,
+             labeller = label_both) +
   scale_y_log10() +
+  scale_size_continuous(name = "new.infections.per.shock",
+                        labels = unique(paltiel$new.infections.per.shock)) +
+  scale_color_discrete(name = NULL) +
   geom_point() +
   geom_path(size = 1) +
-  theme(legend.title = element_blank()) +
+  # theme(legend.title = element_blank()) +
   ggtitle("Time vs Size of Peak Isolation by Frequency & Shock Size")
 ```
 
@@ -46,11 +50,15 @@ ggplot(paltiel %>% filter(time.to.return.fps.from.isolation == 14,
       group = frequency.screening,
       col = frequency.screening,
       size = new.infections.per.shock) +
-  facet_grid(. ~ r0) +
+  facet_grid(. ~ r0,
+             labeller = label_both) +
   scale_y_log10() +
+  scale_size_continuous(name = "new.infections.per.shock",
+                        labels = unique(paltiel$new.infections.per.shock)) +
+  scale_color_discrete(name = NULL) +
   geom_point() +
   geom_path(size = 1) +
-  theme(legend.title = element_blank()) +
+  # theme(legend.title = element_blank()) +
   ggtitle("Time of Peak vs Total Infections by Frequency & Shock Size")
 ```
 
