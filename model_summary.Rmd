@@ -1,0 +1,223 @@
+---
+title: "DSI Campus Model Team Summaries `r format(Sys.time(), '%d %B %Y')`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 7, fig.height = 3)
+```
+
+```{r}
+library(tidyverse)
+```
+
+### McGee Washington Model
+
+```{r}
+mcgee <- read.csv("data/summary_McGee_model.csv")
+tmp <- list()
+for(i in c("weekly", "ever","biw")) {
+  tmp[[i]] <- mcgee[,grep(i, names(mcgee))]
+  names(tmp[[i]]) <- str_remove(names(tmp[[i]]), "[a-z]*_")
+}
+names(tmp)[2:3] <- c("everyday","biweekly")
+mcgee <-
+  bind_rows(tmp,
+            .id = "frequency") %>%
+  mutate(frequency = factor(frequency, c("biweekly", "weekly", "everyday")))
+rm(i, tmp)
+```
+
+```{r eval=FALSE}
+Note that this data set has 18 columns, 3 times the following 6:
+
+"    "_time_end = time in days until the end of the outbreak in days
+"    "_total_perc_inf  = total percent of infected until the end of the outbreak
+"    "_peak_inf = number of people in the peak of infected (not percent)
+"    "_time_peak_inf = time in days until the peak of infected
+"    "_peak_iso = number of people in the peak of isolated (not percent)
+"    "_time_peak_iso = time in days until the peak of isolated
+
+The first word of each column is the type of testing strategy. The difference of testing strategies in the file that I sent is that I am changing the testing cadence first weekly, then everyday, and finally biweekly. Each row corresponds to one run of 400 simulations. This model has a several number of parameters, I am listing them here, most of them are self-explained but if you have any question please let me know. 
+```
+
+```{r eval=FALSE}
+Parameters
+
+NUM_COHORTS              = 8            
+NUM_NODES_PER_COHORT     = 850           # students per cohort
+NUM_TEAMS_PER_COHORT     = 10
+
+MEAN_INTRACOHORT_DEGREE  = 6
+PCT_CONTACTS_INTERCOHORT = 0.1
+N = NUM_NODES_PER_COHORT*NUM_COHORTS = 6800 susceptible
+INIT_EXPOSED = 25
+
+latentPeriod_mean, latentPeriod_coeffvar = 3.0, 0.6
+symptomaticPeriod_mean, symptomaticPeriod_coeffvar = 4.0, 0.4
+onsetToHospitalizationPeriod_mean, onsetToHospitalizationPeriod_coeffvar = 11.0, 0.45
+hospitalizationToDischargePeriod_mean, hospitalizationToDischargePeriod_coeffvar = 11.0, 0.45
+hospitalizationToDeathPeriod_mean, hospitalizationToDeathPeriod_coeffvar = 10.0, 0.45
+
+PCT_ASYMPTOMATIC = 0.25
+PCT_HOSPITALIZED = 0.1
+PCT_FATALITY = 0.06
+R0_mean     = 2.37, R0_coeffvar = 1.5
+
+P_GLOBALINTXN = 0.3   #30% of interactions being with incidental or casual contacts outside their set of close contacts
+
+INTERVENTION_START_PCT_INFECTED = 0/100        # population disease prevalence that triggers the start of the TTI interventions
+AVERAGE_INTRODUCTIONS_PER_DAY   = 1/14          # expected number of new exogenous exposures per day
+
+TESTING_CADENCE                 = 'weekly'      # how often to do testing (other than self-reporting symptomatics who can get
+                                                #   tested any day)
+PCT_TESTED_PER_DAY              = 2000/N        # max daily test allotment defined as a percent of population size
+TEST_FALSENEG_RATE              = 'temporal'    # test false negative rate, will use FN rate that varies with disease time
+                                                # specifies the test sensitivity via the false negative rates to be used;
+                                                #   numerical value specifies constant false negative rate;
+                                                #   "temporal" specifies that temporal, state-based false negative rates
+                                                #   are to be used
+MAX_PCT_TESTS_FOR_SYMPTOMATICS  = 0.95          # max percent of daily test allotment to use on self-reporting symptomatics
+MAX_PCT_TESTS_FOR_TRACES        = 1000/N        # max percent of daily test allotment to use on contact traces
+RANDOM_TESTING_DEGREE_BIAS      = 0             # magnitude of degree bias in random selections for testing, none here
+
+PCT_CONTACTS_TO_TRACE           = 0.0           # percentage of primary cases' contacts that are traced
+TRACING_LAG                     = 2             # number of cadence testing days between primary tests and tracing tests
+                                                # the number of cadence testing days between identification of a positive case
+                                                # and the testing of their traced contacts
+
+ISOLATION_LAG_SYMPTOMATIC       = 1             # number of days between onset of symptoms and self-isolation of symptomatics
+ISOLATION_LAG_POSITIVE          = 2             # test turn-around time (TAT): number of days between administration of test
+                                                #   and isolation of positive cases
+ISOLATION_LAG_CONTACT           = 0             # number of days between a contact being traced and that contact self-isolating
+
+TESTING_COMPLIANCE_RATE_SYMPTOMATIC                  = 0.8    
+TESTING_COMPLIANCE_RATE_TRACED                       = 0.5
+TESTING_COMPLIANCE_RATE_RANDOM                       = 0.5  # Assume student testing is not mandatory
+
+TRACING_COMPLIANCE_RATE                              = 0.5
+
+ISOLATION_COMPLIANCE_RATE_SYMPTOMATIC_INDIVIDUAL     = 0.4
+ISOLATION_COMPLIANCE_RATE_SYMPTOMATIC_GROUPMATE      = 0.3
+ISOLATION_COMPLIANCE_RATE_POSITIVE_INDIVIDUAL        = 0.9
+ISOLATION_COMPLIANCE_RATE_POSITIVE_GROUPMATE         = 0.8  # Isolate teams with a positive member,
+                                                            # but suppose 20% of students need to be in-person
+ISOLATION_COMPLIANCE_RATE_POSITIVE_CONTACT           = 0.2
+ISOLATION_COMPLIANCE_RATE_POSITIVE_CONTACTGROUPMATE  = 0.5
+```
+
+
+```{r}
+ggplot(mcgee) +
+  aes(time_peak_iso, peak_iso, col = frequency) +
+  geom_smooth(size = 2, se = FALSE) +
+  geom_point(alpha = 0.2) +
+  scale_x_log10() +
+  scale_y_log10() +
+  ggtitle("Time to Peak Isolation vs Peak of Isolations")
+```
+
+```{r}
+ggplot(mcgee) +
+  aes(time_peak_inf, peak_inf, col = frequency) +
+  geom_smooth(size = 2, se = FALSE) +
+  geom_point(alpha = 0.2) +
+  scale_x_log10() +
+  scale_y_log10() +
+  ggtitle("Time to Peak vs Peak Infections")
+```
+
+```{r}
+ggplot(mcgee) +
+  aes(time_peak_inf, total_perc_inf, col = frequency) +
+  geom_smooth(size = 2, se = FALSE) +
+  geom_point(alpha = 0.2) +
+  scale_x_log10() +
+#  scale_y_log10() +
+  ggtitle("Time to Peak vs Percent Infected")
+```
+
+### Paltiel Harvard/Yale model
+
+```{r}
+paltiel <- read.csv("data/output_parameter_sweep_20200921.csv") %>%
+  mutate(frequency.screening = factor(frequency.screening, unique(frequency.screening)))
+```
+
+As screening frequency increases, the number of people isolated increases, and hence peak occupancy increases. The number of initial infections has a minor effect on peak occupancy, but larger initial number leads to earlier peak (multiple points joined by lines). Higher transmission (R0, left to right) and larger new infection shocks (up to down) lead to more isolations.
+
+```{r fig.height = 7, fig.width = 7}
+ggplot(paltiel %>% filter(time.to.return.fps.from.isolation == 14)) +
+  aes(Time.of.Peak.Isolation, Peak.Isolation.Occupancy, group = frequency.screening, col = frequency.screening) +
+  facet_grid(new.infections.per.shock ~ r0) +
+  scale_y_log10() +
+  geom_point() +
+  geom_path() +
+  ggtitle("Time to Peak Isolation by Peak Isolation Frequency across Initial Infection")
+```
+
+\newpage
+As screening frequency increases, the total number of infections drops dramatically. More initial infections lead to more total infections (multiple points joined by lines). Higher transmission (R0, left to right) and larger new infection shocks (up to down) lead to more infections.
+
+```{r fig.height = 7, fig.width = 7}
+ggplot(paltiel %>% filter(time.to.return.fps.from.isolation == 14)) +
+  aes(Time.of.Peak.Isolation, Total.Infections, group = frequency.screening, col = frequency.screening) +
+  facet_grid(new.infections.per.shock ~ r0) +
+  scale_y_log10() +
+  geom_point() +
+  geom_path() +
+  ggtitle("Time to Peak Isolation by Total Infections across Initial Infection")
+```
+
+```{r eval=FALSE}
+Here is a CSV that Sri and I put together based on the Harvard/Yale model of Paltiel et al.  It includes the following parameters:
+
+Parameter Sweep
+  initial.infected = c(outer(c(1,5),10^(1:2),"*"),1000)
+  r0 = seq(0.5,1.5,0.25)
+  new.infections.per.shock = c(outer(c(1,5),10^(0:1),"*"),100)
+  frequency.screening = c("Symptoms Only”,
+   "Every 4 Weeks”,
+ "Every 3 Weeks”,
+ "Every 2 Weeks”,
+ "Weekly”,
+ "Every 3 Days”,
+ "Every 2 Days”,
+ "Daily”)
+  time.to.return.fps.from.isolation = c(1,2,14)
+
+Parameter Input (Default)
+  initial.susceptible = 6800,
+  initial.infected = 100,
+  r0 = 1.5,
+  exogenous.shocks = "Yes",
+  frequency.exogenous.shocks.per.day = 7,
+  new.infections.per.shock = 10,
+  days.incubation = 3,
+  time.to.recovery = 14,
+  per.asymptotics.advancing.to.symptoms = 0.3,
+  symptom.case.fatality.ratio = 0.0005,
+  frequency.screening = "Every 2 Weeks",
+  test.sensitivity = 0.8,
+  test.specificity = 0.98,
+  test.cost = 25,
+  time.to.return.fps.from.isolation = 1,
+  confirmatory.test.cost = 100
+
+The output columns provided in the csv are 
+  Peak Isolation Occupancy
+  Time of Peak Isolation
+  Total Persons Tested in 80 days
+  Total Confirmatory Tests Performed
+  Average Isolation Unit Census
+  Average %TP in Isolation
+  Total testing cost
+  Total Infections
+
+This only took a few minutes to run for the 3000 parameters in the sweep above, so if there are other values of the parameter sweep you would like to see or different default parameters, please let us know and we can re-run.  This will get incorporated into the dashboard (with visualizations) in the next couple of days.
+```
+
+
