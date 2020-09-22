@@ -220,4 +220,5 @@ The output columns provided in the csv are
 This only took a few minutes to run for the 3000 parameters in the sweep above, so if there are other values of the parameter sweep you would like to see or different default parameters, please let us know and we can re-run.  This will get incorporated into the dashboard (with visualizations) in the next couple of days.
 ```
 
+This document summarizes DSI Campus Model Team efforts to date. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/model_summary.Rmd).
 
