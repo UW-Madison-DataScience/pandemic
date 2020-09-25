@@ -91,9 +91,9 @@ countroom <- function(room) {
 
 ```{r}
 oneroom <- cdc_date %>%
-  filter(Event == "ResultDate") %>%
+  filter(Event == "CollectionDate") %>%
   group_by(FAKEHALL, FAKEHOUS, fakeroom, PatientID) %>%
-  summarize(Date = min(Date[Positive == max(Positive)]),
+  summarize(Date = ifelse(max(Positive) == 1, min(Date[Positive == 1]), max(Date)),
             Positive = max(Positive)) %>%
   ungroup %>%
   group_by(FAKEHALL, FAKEHOUS, fakeroom) %>%
@@ -109,7 +109,7 @@ one <- oneroom %>%
   group_by(FAKEHALL, FAKEHOUS, Positive) %>%
   summarize(center = median(Date),
             spread = IQR(Date),
-            count = n()) %>%
+            HouseSize = n()) %>%
   ungroup
 ```
 
@@ -118,86 +118,145 @@ Number of rooms with 0, 1 or 2 students positive:
 ```{r}
 one %>%
   group_by(FAKEHALL, Positive) %>%
-  summarize(count = sum(count)) %>%
+  summarize(HouseSize = sum(HouseSize)) %>%
   ungroup %>%
   mutate(Positive = paste0("Pos", Positive)) %>%
-  pivot_wider(names_from = "Positive", values_from = "count", values_fill = 0) %>%
+  pivot_wider(names_from = "Positive", values_from = "HouseSize", values_fill = 0) %>%
   mutate(total = Pos0 + Pos1 + Pos2) %>%
   arrange(desc(total)) %>%
   kprint()
 ```
+Next plot summarizes by House (point) within Hall (facet) differences within rooms of last collection date; center = median, spread = IQR.
+Subsequent plots show individual students per horizontal line (sometimes with a little jitter), with roommates adjacent to each other. Coloring highlights time course of dates, positive vs negative, or room.
 
 ```{r}
 ggplot(one %>%
          mutate(Positive = factor(Positive))) +
-  aes(center, spread, col = Positive) +
+  aes(center, spread, col = Positive, size = HouseSize) +
   facet_wrap(~ FAKEHALL) +
-  geom_jitter(alpha = 0.75, size = 2) +
-  ggtitle("Days between Results by House within Hall")
+  geom_jitter(width = 0.1, alpha = 0.25) +
+  ggtitle("Days between Last Collection Dates per Room by House within Hall")
 ```
 
 ```{r}
 both <- oneroom %>%
   filter(Positive == 2) %>%
   select(FAKEHALL, FAKEHOUS, fakeroom, PatientID)
-half <- unique((oneroom %>%
-           filter(Positive == 1))$fakeroom)
+half <- oneroom %>%
+  filter(Positive == 1) %>%
+  select(FAKEHALL, FAKEHOUS, fakeroom, PatientID)
 cdcID <- cdc_date %>% 
-  filter(fakeroom %in% both$fakeroom, FAKEHOUS %in% both$FAKEHOUS, FAKEHALL %in% both$FAKEHALL) %>%
+  filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS)) %>%
   group_by(FAKEHALL, FAKEHOUS, PatientID) %>%
-  summarize(Date = min(Date)) %>%
+  summarize(Date = min(Date),
+            fakeroom = fakeroom[1]) %>%
   ungroup %>%
   group_by(FAKEHALL) %>%
-  mutate(ID = rank(Date, ties.method = "random")) %>%
+  mutate(ID = 0.25 + rank(10000 * FAKEHOUS + fakeroom, ties.method = "random") / 2,
+         roomID = rank(10000 * FAKEHOUS + fakeroom)) %>%
   ungroup %>%
-  select(FAKEHALL, PatientID, ID)
+  select(FAKEHALL, PatientID, ID, roomID)
+cdcIDh <- cdc_date %>% 
+  filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(half$fakeroom, half$FAKEHALL, half$FAKEHOUS)) %>%
+  group_by(FAKEHALL, FAKEHOUS, PatientID) %>%
+  summarize(Date = min(Date),
+            fakeroom = fakeroom[1]) %>%
+  ungroup %>%
+  group_by(FAKEHALL) %>%
+  mutate(ID = 0.25 +rank(10000 * FAKEHOUS + fakeroom, ties.method = "random") / 2,
+         roomID = rank(10000 * FAKEHOUS + fakeroom)) %>%
+  ungroup %>%
+  select(FAKEHALL, PatientID, ID, roomID)
 ```
 
 ```{r fig.width = 10}
 ggplot(
   left_join(
     cdc_date %>% 
-      filter(fakeroom %in% both$fakeroom, FAKEHALL %in% both$FAKEHALL) %>%
+      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS)) %>%
       select(-ID),
     cdcID,
-    by = c("FAKEHALL", "PatientID")) %>%
-    mutate(Date = reorder(Date, Date, mean))) +
+    by = c("FAKEHALL", "PatientID"))) +
   aes(Date, ID, col = Event, group = ID) +
-  geom_jitter() +
+  geom_jitter(width = 0.05) +
   geom_path() +
   facet_wrap(~ FAKEHALL, scales = "free_y") +
   ggtitle("Time Course by Individual when Both Roommates Positive")
+```
+
+```{r fig.width = 10}
+tmp <- left_join(
+    cdc_date %>% 
+      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS),
+             Event == "CollectionDate") %>%
+      select(-ID),
+    cdcID,
+    by = c("FAKEHALL", "PatientID"))
+ggplot(tmp) +
+  aes(Date, ID, col = factor(roomID), group = ID) +
+  geom_point() +
+  geom_path() +
+  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  theme(legend.position = "none") +
+  scale_color_manual(values = rep(2:7, length.out = length(unique(tmp$roomID)))) +
+  ggtitle("Collection Dates by Individual when Both Roommates Positive")
+```
+
+```{r}
+half_date <- left_join(
+    cdc_date %>% 
+      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(half$fakeroom, half$FAKEHALL, half$FAKEHOUS),
+             Event == "CollectionDate") %>%
+      select(-ID),
+    cdcIDh,
+    by = c("FAKEHALL", "PatientID")) %>%
+  group_by(PatientID) %>%
+  mutate(Positive = c("Negative","Positive")[1 + max(Positive)]) %>%
+  ungroup
+```
+
+
+```{r fig.width = 10}
+ggplot(half_date) +
+  aes(Date, ID, col = Positive, group = ID) +
+  geom_point() +
+  geom_path() +
+  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  ggtitle("Collection Dates by Individual when One Roommate is Positive")
 ```
 
 ```{r}
 ggplot(
   left_join(
     cdc_date %>% 
-      filter(fakeroom %in% both$fakeroom, FAKEHALL %in% both$FAKEHALL) %>%
+      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS)) %>%
       select(-ID),
     cdcID,
     by = c("FAKEHALL", "PatientID")) %>%
     filter(FAKEHALL == 5, fakeroom != 14933)) + # not sure why this shows up
   aes(Date, ID, col = Event, group = ID) +
-  geom_jitter(size = 2) +
+  geom_jitter(width = 0.05, size = 2) +
   facet_wrap(~ fakeroom, scales = "free_y") +
-  ggtitle("Roommates Both Positive for Fake Hall 5")
+  ggtitle("All Dates for Roommates Both Positive in Fake Hall 5")
 ```
 
 ```{r fig.width = 10}
 ggplot(
   left_join(
     cdc_date %>% 
-      filter(fakeroom %in% both$fakeroom, FAKEHALL %in% both$FAKEHALL) %>%
+      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS),
+             Event == "CollectionDate") %>%
       select(-ID),
     cdcID,
     by = c("FAKEHALL", "PatientID")) %>%
     filter(FAKEHALL == 16)) +
-  aes(Date, ID, col = Event, group = ID) +
+  aes(Date, ID, col = factor(roomID), group = ID) +
   geom_point() +
   geom_path() +
   facet_wrap(~ FAKEHOUS, scales = "free_y") +
-  ggtitle("Houses with Roommates Both Positive for Fake Hall 16")
+  theme(legend.position = "none") +
+  scale_color_manual(values = rep(2:7, length.out = length(unique(tmp$roomID)))) +
+ ggtitle("Collection Dates for Fake Hall 16 Houses with Roommates Both Positive")
 ```
 
 ```{r}
