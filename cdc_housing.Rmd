@@ -9,6 +9,8 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
                       fig.width = 10, fig.height = 7)
 ```
 
+This document summarizes housing information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/cdc_housing.Rmd).
+
 ```{r}
 library(tidyverse)
 kprint <- function(x) {
