@@ -236,5 +236,20 @@ ggplot(mcgee) +
   ggtitle("Time to Peak vs Percent Infected")
 ```
 
+### Cornell Frazier Model
+
+```{r eval=FALSE}
+I'm not entirely clear about the request - are you looking for descriptions of the in/out for the model, or for actual simulation input/output? The way that the cornell framework manipulates the output is kind of baked into their analysis, primarily due to the hierarchical structure of the input configurations. For example, there is one overarching parameter specification for all groups, and individual-level parameter specification overrides for each individual group. Model output is stored in a nested list configuration, with one entry for each iteration of a model containing a list of dataframes of outputs, one for each group in the model. This data structure is then stored as a serialized pkl file. It's kind of a mess to navigate - I'm happy to jump on a call to chat about it if you'd like (it might be easier than trying to type it all out). FWIW, I was also working on moving to a flatter storage approach using a two-table database which would be much easier to navigate, and more conducive to the distributed computing approach.
+
+I've attached an example set of input parameters and output data (exporting a single data frame) in case it's useful. A list of the inputs can also be found at [Cornell model inputs[(https://docs.google.com/spreadsheets/d/179_u8XjTZkDaQrWeUkc9eYWINnvOMeWhUH5_Cw1CeHY).
+```
+
+```{r}
+#cornelli <- read.csv("data/example_input.csv")
+cornell <- read.csv("data/example_output.csv")
+```
+
+<hr>
+
 This document summarizes DSI Campus Model Team efforts to date. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/model_summary.Rmd).
 

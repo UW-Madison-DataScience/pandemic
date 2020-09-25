@@ -1,0 +1,287 @@
+---
+title: "CDC_Housing"
+author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 7)
+```
+
+```{r}
+library(tidyverse)
+kprint <- function(x) {
+  if(interactive()) {
+    print(x)
+  } else {
+    knitr::kable(x)
+  }
+}
+```
+
+```{r}
+cdc <- read.csv("data/matchforCDC-PHI.csv") %>%
+  select(PatientID, 
+         ResultDate, CollectionDate, ConfirmedDate, TracedDate,
+         Residence_Hall, fakeroom, FAKEHALL, FAKEHOUS, Positive) %>%
+  filter(!is.na(FAKEHALL),
+         !is.na(PatientID)) %>%
+  mutate(Campus = ifelse(Residence_Hall == "off campus", "off", "on")) %>%
+  select(-Residence_Hall)
+# Only a few off campus and no positives, so drop them.
+cdc <- cdc %>%
+  filter(Campus == "on") %>%
+  select(-Campus)
+```
+
+```{r}
+IDs <- sort(unique(cdc$PatientID))
+pos <- (cdc %>% filter(Positive == 1))$PatientID
+```
+
+```{r}
+cdc_date <- cdc %>%
+  pivot_longer(ResultDate:TracedDate, names_to = "Event", values_to = "Date") %>%
+  distinct(PatientID, Date, Event, .keep_all = TRUE) %>%
+  mutate(Event = factor(Event, c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
+         ID = match(PatientID, IDs),
+         Date = as.Date(Date, "%m/%d/%Y")) %>%
+  filter(Date > as.Date("2020-01-01"))
+```
+
+```{r}
+# This does not do what I want.
+# Want to replace ID with order of date, but only first instance for each PatientID
+idf <- function(ID, dat, group) {
+  set <- transpose(
+    list(s = split(ID, group),
+         d = split(dat, group)))
+  out <- map(set, function(x) {
+    dmin <- sapply(split(x$d, x$s), min)
+    out <- 
+    names(out) <- x$s
+    out
+  })
+  names(out) <- NULL
+  # want to turn list into vector here****
+  as_vector(out)[as.character(ID)]
+}
+```
+
+```{r}
+countroom <- function(room) {
+  out <- room %>%
+    mutate(PatientID = paste0("N", match(PatientID, sort(unique(PatientID)))))
+  if(length(unique(out$PatientID)) > 1) {
+    out <- out%>%
+      pivot_wider(names_from = "PatientID", values_from = "Positive") %>%
+      arrange(Date) %>%
+      fill(contains("N")) %>%
+      pivot_longer(any_of(paste0("N",1:10)), 
+                   names_to = "roommate", values_to = "score") %>%
+      ungroup %>%
+      group_by(Date) %>%
+      summarize(score = sum(score, na.rm = TRUE)) %>%
+      ungroup
+  }
+  out
+}
+```
+
+```{r}
+oneroom <- cdc_date %>%
+  filter(Event == "ResultDate") %>%
+  group_by(FAKEHALL, FAKEHOUS, fakeroom, PatientID) %>%
+  summarize(Date = min(Date[Positive == max(Positive)]),
+            Positive = max(Positive)) %>%
+  ungroup %>%
+  group_by(FAKEHALL, FAKEHOUS, fakeroom) %>%
+  arrange(Date) %>%
+  mutate(Positive = cumsum(Positive),
+         Date = max(Date) - min(Date),
+         Positive = max(Positive),
+         Roommates = n()) %>%
+  ungroup %>%
+  filter(Roommates == 2,
+         !is.na(Date))
+one <- oneroom %>%
+  group_by(FAKEHALL, FAKEHOUS, Positive) %>%
+  summarize(center = median(Date),
+            spread = IQR(Date),
+            count = n()) %>%
+  ungroup
+```
+
+Number of rooms with 0, 1 or 2 students positive:
+
+```{r}
+one %>%
+  group_by(FAKEHALL, Positive) %>%
+  summarize(count = sum(count)) %>%
+  ungroup %>%
+  mutate(Positive = paste0("Pos", Positive)) %>%
+  pivot_wider(names_from = "Positive", values_from = "count", values_fill = 0) %>%
+  mutate(total = Pos0 + Pos1 + Pos2) %>%
+  arrange(desc(total)) %>%
+  kprint()
+```
+
+```{r}
+ggplot(one %>%
+         mutate(Positive = factor(Positive))) +
+  aes(center, spread, col = Positive) +
+  facet_wrap(~ FAKEHALL) +
+  geom_jitter(alpha = 0.75, size = 2) +
+  ggtitle("Days between Results by House within Hall")
+```
+
+```{r}
+both <- oneroom %>%
+  filter(Positive == 2) %>%
+  select(FAKEHALL, FAKEHOUS, fakeroom, PatientID)
+half <- unique((oneroom %>%
+           filter(Positive == 1))$fakeroom)
+cdcID <- cdc_date %>% 
+  filter(fakeroom %in% both$fakeroom, FAKEHOUS %in% both$FAKEHOUS, FAKEHALL %in% both$FAKEHALL) %>%
+  group_by(FAKEHALL, FAKEHOUS, PatientID) %>%
+  summarize(Date = min(Date)) %>%
+  ungroup %>%
+  group_by(FAKEHALL) %>%
+  mutate(ID = rank(Date, ties.method = "random")) %>%
+  ungroup %>%
+  select(FAKEHALL, PatientID, ID)
+```
+
+```{r fig.width = 10}
+ggplot(
+  left_join(
+    cdc_date %>% 
+      filter(fakeroom %in% both$fakeroom, FAKEHALL %in% both$FAKEHALL) %>%
+      select(-ID),
+    cdcID,
+    by = c("FAKEHALL", "PatientID")) %>%
+    mutate(Date = reorder(Date, Date, mean))) +
+  aes(Date, ID, col = Event, group = ID) +
+  geom_jitter() +
+  geom_path() +
+  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  ggtitle("Time Course by Individual when Both Roommates Positive")
+```
+
+```{r}
+ggplot(
+  left_join(
+    cdc_date %>% 
+      filter(fakeroom %in% both$fakeroom, FAKEHALL %in% both$FAKEHALL) %>%
+      select(-ID),
+    cdcID,
+    by = c("FAKEHALL", "PatientID")) %>%
+    filter(FAKEHALL == 5, fakeroom != 14933)) + # not sure why this shows up
+  aes(Date, ID, col = Event, group = ID) +
+  geom_jitter(size = 2) +
+  facet_wrap(~ fakeroom, scales = "free_y") +
+  ggtitle("Roommates Both Positive for Fake Hall 5")
+```
+
+```{r fig.width = 10}
+ggplot(
+  left_join(
+    cdc_date %>% 
+      filter(fakeroom %in% both$fakeroom, FAKEHALL %in% both$FAKEHALL) %>%
+      select(-ID),
+    cdcID,
+    by = c("FAKEHALL", "PatientID")) %>%
+    filter(FAKEHALL == 16)) +
+  aes(Date, ID, col = Event, group = ID) +
+  geom_point() +
+  geom_path() +
+  facet_wrap(~ FAKEHOUS, scales = "free_y") +
+  ggtitle("Houses with Roommates Both Positive for Fake Hall 16")
+```
+
+```{r}
+knitr::knit_exit()
+```
+
+### Older Stuff
+
+```{r}
+tmp <- (cdc %>% count(PatientID, name = "tests") %>% count(tests) %>% t)
+colnames(tmp) <- rep("", ncol(tmp))
+tmp
+```
+
+
+```{r}
+tmp <- cdc %>% 
+  count(FAKEHALL, FAKEHOUS, PatientID, name = "count") %>%
+  mutate(count = factor(ifelse(count > 5, ">5", as.character(count)), c(1:5, ">5"))) %>%
+  count(FAKEHALL, FAKEHOUS, count) %>%
+  mutate(FAKEHALL = factor(FAKEHALL))
+ggplot(tmp) +
+  aes(count, n, col = FAKEHALL, group = FAKEHALL) +
+  geom_point() +
+  geom_path() +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  xlab("Number of Tests") +
+  ylab("Student Count") +
+  ggtitle("How Many Tests per Student by Hall?")
+```
+
+```{r}
+ggplot(cdc_date %>% filter(PatientID %in% pos, FAKEHALL == FAKEHALL[1])) +
+  aes(Date, ID, col = Event, group = ID) +
+  geom_point() +
+  geom_path() +
+  ggtitle("Positive")
+```
+
+
+```{r}
+ggplot(cdc_date %>% filter(PatientID %in% pos, FAKEHALL == FAKEHALL[1], Event %in% c("ConfirmedDate", "TracedDate"))) +
+  aes(Date, ID, col = Event, group = ID) +
+  geom_point() +
+  geom_path() +
+  ggtitle("Positive")
+```
+
+
+```{r}
+ggplot(cdc_date %>% 
+         filter(PatientID %in% pos, 
+                FAKEHALL == FAKEHALL[1], 
+                Event %in% c("ConfirmedDate", "TracedDate")) %>%
+         mutate(ID = idf(ID, Date, FAKEHOUS))) +
+  aes(Date, ID, col = Event, group = ID) +
+  geom_point() +
+  geom_path() +
+  facet_wrap(~ FAKEHOUS, scales = "free_y") +
+  ggtitle("Positive")
+```
+
+Number of roommates positive by house.
+
+```{r}
+cdc_date %>%
+  filter(PatientID %in% pos, FAKEHALL == FAKEHALL[1], Event %in% c("ConfirmedDate", "TracedDate")) %>%
+  count(fakeroom, FAKEHOUS, name = "nc") %>%
+  count(FAKEHOUS, nc) %>%
+  mutate(nc = paste0("R", nc)) %>%
+  pivot_wider(names_from = "nc", values_from = "n", values_fill = 0) %>%
+  arrange(desc(R1 + R2 + R3 + R4))
+```
+Now would like to look at both positive and negative by house and room to see pattern.
+
+
+```{r}
+ggplot(cdc_date %>% filter(FAKEHALL == FAKEHALL[1], Event %in% c("ConfirmedDate")) %>%
+         mutate(Outcome = c("Negative","Positive")[1+Positive])) +
+  aes(Date, ID, col = Outcome, group = ID) +
+  geom_point() +
+  geom_path() +
+  facet_wrap(~ FAKEHOUS, scales = "free_y") +
+  ggtitle("Negative & Positive")
+```
+
