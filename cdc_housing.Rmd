@@ -23,23 +23,36 @@ kprint <- function(x) {
 ```
 
 ```{r}
-cdc <- read.csv("data/matchforCDC-PHI.csv") %>%
+cdc0 <- read.csv("data/matchforCDC-PHI.csv") %>%
   select(PatientID, 
          ResultDate, CollectionDate, ConfirmedDate, TracedDate,
          Residence_Hall, fakeroom, FAKEHALL, FAKEHOUS, Positive) %>%
-  filter(!is.na(FAKEHALL),
-         !is.na(PatientID)) %>%
-  mutate(Campus = ifelse(Residence_Hall == "off campus", "off", "on")) %>%
+  filter(!is.na(PatientID)) %>%
+  mutate(FAKEHALL = ifelse(is.na(FAKEHALL), -1, FAKEHALL),
+         Campus = ifelse(Residence_Hall == "off campus", "off", "on")) %>%
   select(-Residence_Hall)
 # Only a few off campus and no positives, so drop them.
-cdc <- cdc %>%
+cdc0 <- cdc0 %>%
   filter(Campus == "on") %>%
   select(-Campus)
 ```
 
 ```{r}
+SmallHall <- (cdc0 %>%
+  filter(Positive == 1) %>%
+  count(FAKEHALL) %>%
+  filter(n < 15))$FAKEHALL
+cdc0 <- cdc0 %>%
+  mutate(FAKEHALL = ifelse(FAKEHALL %in% SmallHall, 0, FAKEHALL))
+```
+
+```{r}
+cdc <- cdc0 %>%
+  filter(FAKEHALL != -1)
+```
+
+```{r}
 IDs <- sort(unique(cdc$PatientID))
-pos <- (cdc %>% filter(Positive == 1))$PatientID
 ```
 
 ```{r}
@@ -50,25 +63,6 @@ cdc_date <- cdc %>%
          ID = match(PatientID, IDs),
          Date = as.Date(Date, "%m/%d/%Y")) %>%
   filter(Date > as.Date("2020-01-01"))
-```
-
-```{r}
-# This does not do what I want.
-# Want to replace ID with order of date, but only first instance for each PatientID
-idf <- function(ID, dat, group) {
-  set <- transpose(
-    list(s = split(ID, group),
-         d = split(dat, group)))
-  out <- map(set, function(x) {
-    dmin <- sapply(split(x$d, x$s), min)
-    out <- 
-    names(out) <- x$s
-    out
-  })
-  names(out) <- NULL
-  # want to turn list into vector here****
-  as_vector(out)[as.character(ID)]
-}
 ```
 
 ```{r}
@@ -124,12 +118,17 @@ one %>%
   ungroup %>%
   mutate(Positive = paste0("Pos", Positive)) %>%
   pivot_wider(names_from = "Positive", values_from = "HouseSize", values_fill = 0) %>%
-  mutate(total = Pos0 + Pos1 + Pos2) %>%
-  arrange(desc(total)) %>%
+  mutate(Rooms = Pos0 + Pos1 + Pos2,
+         PctPos = round(100 * (Pos1 + 2 * Pos2) / Rooms, 2)) %>%
+  arrange(desc(PctPos)) %>%
   kprint()
 ```
-Next plot summarizes by House (point) within Hall (facet) differences within rooms of last collection date; center = median, spread = IQR.
+`FAKEHALL` 0 is aggregation of halls with fewer than 15 students reporting. Next plot summarizes by House (point) within Hall (facet) differences within rooms of last collection date; center = median, spread = IQR.
 Subsequent plots show individual students per horizontal line (sometimes with a little jitter), with roommates adjacent to each other. Coloring highlights time course of dates, positive vs negative, or room.
+
+\newpage
+
+### Days Between Collections for Roommates
 
 ```{r}
 ggplot(one %>%
@@ -139,6 +138,88 @@ ggplot(one %>%
   geom_jitter(width = 0.1, alpha = 0.25) +
   ggtitle("Days between Last Collection Dates per Room by House within Hall")
 ```
+
+```{r}
+one_date <- cdc_date %>%
+  filter(Event == "CollectionDate") %>%
+  group_by(FAKEHALL, FAKEHOUS, fakeroom, PatientID) %>%
+  arrange(Date) %>%
+  summarize(Date = Date[length(Date)],
+            Positive = max(Positive)) %>%
+  ungroup %>%
+  group_by(FAKEHALL, FAKEHOUS, fakeroom) %>%
+  arrange(Date) %>%
+  summarize(Delay = max(Date) - min(Date),
+         Positive = sum(Positive),
+         Date = Date[1],
+         Roommates = n()) %>%
+  ungroup %>%
+  filter(Roommates == 2,
+         Positive == 2,
+         !is.na(Date)) %>%
+  select(-Roommates) %>%
+  group_by(FAKEHALL) %>%
+  mutate(roomID = factor(rank(10000 * FAKEHOUS + fakeroom))) %>%
+  ungroup
+```
+
+```{r}
+ggplot(one_date) +
+  aes(Date, Delay, col = roomID) +
+  geom_jitter() +
+  theme(legend.position = "none") +
+  scale_color_manual(values = rep(2:7, length.out = length(unique(one_date$roomID)))) +
+  facet_wrap(~ FAKEHALL) +
+  ggtitle("Delay in Collection Dates between Two Positive Roommates")
+```
+
+\newpage
+
+### Cumulative Counts of Positives by Collection Date
+
+```{r}
+cdc_sum <- cdc_date %>%
+  filter(Event == "CollectionDate", Positive == 1) %>%
+  arrange(Date) %>%
+  count(FAKEHALL, Date, name = "count") %>%
+  group_by(FAKEHALL) %>%
+  mutate(count = cumsum(count)) %>%
+  ungroup
+cdc_tot <- cdc_date %>%
+  filter(Event == "CollectionDate", Positive == 1) %>%
+  arrange(Date) %>%
+  count(Date, name = "all") %>%
+  mutate(all = cumsum(all))
+cdc_sum <- left_join(
+  cdc_sum,
+  cdc_tot,
+  by = "Date")
+```
+
+```{r}
+ggplot(cdc_sum) +
+  aes(Date, count, col = factor(FAKEHALL), group = factor(FAKEHALL)) +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ylab("Cumulative Positive by Hall") +
+  geom_line(size = 2) +
+  ggtitle("Cumulative Positives by Hall over Time")
+```
+
+```{r}
+ggplot(cdc_sum %>% mutate(Hall = factor(FAKEHALL))) +
+  aes(all, count, col = Hall, group = Hall) +
+  geom_line(size = 2) +
+  geom_abline(slope = 1, intercept = 0, col = "gray") +
+  scale_x_log10() +
+  scale_y_log10() +
+  xlab("Cumulative Positive Overall") +
+  ylab("Cumulative Positive by Hall") +
+  theme(legend.position = "none") +
+  ggtitle("Breakdown of Cumulative Positives by Hall")
+```
+
+### Summaries by student within rooms
 
 ```{r}
 both <- oneroom %>%
