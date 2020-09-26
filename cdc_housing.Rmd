@@ -6,7 +6,7 @@ output: word_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE,
-                      fig.width = 10, fig.height = 7)
+                      fig.width = 7, fig.height = 5)
 ```
 
 This document summarizes housing information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/cdc_housing.Rmd).
@@ -140,24 +140,33 @@ ggplot(one %>%
 ```
 
 ```{r}
-one_date <- cdc_date %>%
-  filter(Event == "CollectionDate") %>%
+# Get one record per student
+house <- cdc_date %>%
+  filter(Event == "CollectionDate",
+         !is.na(Date),
+         !is.na(Positive)) %>%
   group_by(FAKEHALL, FAKEHOUS, fakeroom, PatientID) %>%
   arrange(Date) %>%
-  summarize(Date = Date[length(Date)],
-            Positive = max(Positive)) %>%
-  ungroup %>%
+  summarize(Date = last(Date),
+            Positive = last(Positive)) %>%
+  ungroup
+roomsize <- house %>%
+  count(FAKEHALL, FAKEHOUS, fakeroom)
+house <-
+  left_join(house, roomsize, by = c("FAKEHALL", "FAKEHOUS", "fakeroom")) %>%
+  filter(n == 2) %>%
+  select(-n)
+```
+
+```{r}
+one_date <- house %>%
   group_by(FAKEHALL, FAKEHOUS, fakeroom) %>%
   arrange(Date) %>%
   summarize(Delay = max(Date) - min(Date),
          Positive = sum(Positive),
-         Date = Date[1],
-         Roommates = n()) %>%
+         Date = first(Date)) %>%
   ungroup %>%
-  filter(Roommates == 2,
-         Positive == 2,
-         !is.na(Date)) %>%
-  select(-Roommates) %>%
+  filter(Positive == 2) %>%
   group_by(FAKEHALL) %>%
   mutate(roomID = factor(rank(10000 * FAKEHOUS + fakeroom))) %>%
   ungroup
@@ -171,6 +180,60 @@ ggplot(one_date) +
   scale_color_manual(values = rep(2:7, length.out = length(unique(one_date$roomID)))) +
   facet_wrap(~ FAKEHALL) +
   ggtitle("Delay in Collection Dates between Two Positive Roommates")
+```
+
+```{r}
+# do this for each house
+# get median (and maybe IQR?) by same/diff and pos=0,1,2
+# compare across houses in hall
+# compare across halls
+diff_house <- function(object) {
+  object <- arrange(object, -Positive, Date)
+  days <- outer(object$Date, object$Date, "-")
+  days <- days[lower.tri(days)]
+  room <- outer(object$fakeroom, object$fakeroom, "==")
+  room <- room[lower.tri(room)]
+  pos <- outer(object$Positive, object$Positive, "+")
+  pos <- pos[lower.tri(pos)]
+  as_tibble(
+    data.frame(days = days, 
+               room = c("Diff","Same")[1+room],
+               pos = pos))
+}
+```
+
+```{r}
+diff_hall <- function(object) {
+  bind_rows(
+    map(split(object, object$FAKEHOUS), diff_house),
+    .id = "house") %>%
+  group_by(house, room, pos) %>%
+  summarize(days_iqr = IQR(days),
+            days = median(days),
+            size = n()) %>%
+  ungroup
+}
+```
+
+```{r}
+out <- 
+  bind_rows(
+    map(split(house, house$FAKEHALL), diff_hall),
+    .id = "hall")
+```
+
+Compare all pairs of students in each house within each hall. Note middle column compares two students where one is positive and one is negative. Values below 0 for median days signify that the positive students were detected after that most recent test for the negative students.
+
+```{r fig.width = 6, fig.height = 7}
+ggplot(out %>% 
+         mutate(pos = paste(pos, "Positive"),
+                hall = paste("Hall", hall))) +
+  aes(days, days_iqr, col = room, size = size) +
+  facet_grid(hall ~ pos, scale = "free") +
+  xlab("Median Days per House") +
+  ylab("Day Spread per House") +
+  geom_point(alpha = 0.5) +
+  ggtitle("Delay in Collection Dates for Same or Different Rooms in House")
 ```
 
 \newpage
@@ -252,7 +315,7 @@ cdcIDh <- cdc_date %>%
   select(FAKEHALL, PatientID, ID, roomID)
 ```
 
-```{r fig.width = 10}
+```{r fig.width = 9}
 ggplot(
   left_join(
     cdc_date %>% 
@@ -267,7 +330,7 @@ ggplot(
   ggtitle("Time Course by Individual when Both Roommates Positive")
 ```
 
-```{r fig.width = 10}
+```{r}
 tmp <- left_join(
     cdc_date %>% 
       filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS),
@@ -323,7 +386,7 @@ ggplot(
   ggtitle("All Dates for Roommates Both Positive in Fake Hall 5")
 ```
 
-```{r fig.width = 10}
+```{r fig.height = 9, fig.width = 10}
 ggplot(
   left_join(
     cdc_date %>% 
