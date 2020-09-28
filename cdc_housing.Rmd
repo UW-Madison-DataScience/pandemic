@@ -23,6 +23,8 @@ kprint <- function(x) {
 ```
 
 ```{r}
+filename <- scan("data/housing_data_url.txt", "text")
+# Need to download this file; could use boxr package
 cdc0 <- read.csv("data/matchforCDC-PHI.csv") %>%
   select(PatientID, 
          ResultDate, CollectionDate, ConfirmedDate, TracedDate,
@@ -182,11 +184,95 @@ ggplot(one_date) +
   ggtitle("Delay in Collection Dates between Two Positive Roommates")
 ```
 
+### Positive Cases within Rooms over Date
+
+Idea here is to just look at dates of positive cases and link cases within rooms by a horizontal line. First plot colors rooms by 1 or 2 positive cases. Other plots color rooms by house to look for patterns that cut across houses in halls.
+
 ```{r}
-# do this for each house
-# get median (and maybe IQR?) by same/diff and pos=0,1,2
-# compare across houses in hall
-# compare across halls
+room_rank <- function(fakeroom) {
+  roomID <- rank(sort(unique(fakeroom)))
+  names(roomID) <- sort(unique(fakeroom))
+  roomID[as.character(fakeroom)]
+}
+pair_house <- function(house) {
+  pos_pair <- house %>%
+    filter(Positive == 1) %>%
+    mutate(fakeroom = room_rank(fakeroom)) %>%
+    arrange(Date, fakeroom)
+  pos_room <- pos_pair %>%
+    group_by(fakeroom) %>%
+    arrange(Date) %>%
+    summarize(Positive = n(),
+              Room = first(Date)) %>%
+    ungroup %>%
+    mutate(Room = rank(Room, ties.method = "random"))
+  left_join(
+    pos_pair %>% select(-Positive),
+    pos_room,
+    by = "fakeroom") %>%
+  mutate(Positive = factor(Positive))
+}
+```
+
+```{r}
+pair_hall <- function(object) {
+  bind_rows(
+    map(split(object, object$FAKEHOUS), pair_house),
+    .id = "house")
+}
+```
+
+```{r fig.width = 10, fig.height = 7}
+ggplot(pair_hall(house %>% filter(FAKEHALL == 10))) +
+  aes(Date, Room, col = Positive, group = Room) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ house, scale = "free") +
+  theme(legend.position = "none") +
+  ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
+```
+
+```{r fig.width = 10, fig.height = 6}
+ggplot(pair_house(house %>% filter(FAKEHALL == 10))) +
+  aes(Date, Room, col = factor(FAKEHOUS), group = Room) +
+  geom_line() +
+  geom_point() +
+  theme(legend.position = "none") +
+  ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
+```
+
+```{r}
+out <- 
+  bind_rows(
+    map(split(house, house$FAKEHALL), pair_house),
+    .id = "hall")
+```
+
+```{r fig.width = 10, fig.height = 10}
+ggplot(out %>% filter(hall %in% c(10, 16))) +
+  aes(Date, Room, col = factor(FAKEHOUS), group = Room) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ hall, scales = "free") +
+  theme(legend.position = "none") +
+  ggtitle("Positive Collection Dates by House across Halls")
+```
+
+```{r fig.width = 10, fig.height = 10}
+ggplot(out) +
+  aes(Date, Room, col = factor(FAKEHOUS), group = Room) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ hall, scales = "free") +
+  theme(legend.position = "none") +
+  ggtitle("Positive Collection Dates by House across Halls")
+```
+
+\newpage
+
+### Same vs Different Rooms
+
+```{r}
 diff_house <- function(object) {
   object <- arrange(object, -Positive, Date)
   days <- outer(object$Date, object$Date, "-")
@@ -195,10 +281,15 @@ diff_house <- function(object) {
   room <- room[lower.tri(room)]
   pos <- outer(object$Positive, object$Positive, "+")
   pos <- pos[lower.tri(pos)]
+  roomID <- rank(sort(unique(object$fakeroom)))
+  names(roomID) <- sort(unique(object$fakeroom))
+  roomID <- outer(object$fakeroom, roomID[as.character(object$fakeroom)], function(x,y) y)
+  roomID <- roomID[lower.tri(roomID)]
   as_tibble(
     data.frame(days = days, 
                room = c("Diff","Same")[1+room],
-               pos = pos))
+               pos = pos,
+               roomID = roomID))
 }
 ```
 
