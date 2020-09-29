@@ -13,6 +13,7 @@ This document summarizes housing information. The R code file can be found in th
 
 ```{r}
 library(tidyverse)
+library(lubridate)
 kprint <- function(x) {
   if(interactive()) {
     print(x)
@@ -195,6 +196,7 @@ room_rank <- function(fakeroom) {
   roomID[as.character(fakeroom)]
 }
 pair_house <- function(house) {
+  nhouse <- nrow(house)
   pos_pair <- house %>%
     filter(Positive == 1) %>%
     mutate(fakeroom = room_rank(fakeroom)) %>%
@@ -210,33 +212,71 @@ pair_house <- function(house) {
     pos_pair %>% select(-Positive),
     pos_room,
     by = "fakeroom") %>%
-  mutate(Positive = factor(Positive))
+  mutate(Positive = factor(Positive),
+         students = nhouse) %>%
+  count(students, Date, Room, Positive, name = "count") 
 }
+```
+
+```{r}
+out <- pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39))
+```
+
+```{r}
+ggplot(out) +
+  aes(Date, Room, col = Positive, group = Room, size = count) +
+  geom_line() +
+  geom_point() +
+#  facet_wrap(~ house, scale = "free") +
+  theme(legend.position = "none") +
+  ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
+```
+
+```{r}
+object <- house %>% filter(FAKEHALL == 10)
+out <- bind_rows(
+    map(split(object, object$FAKEHOUS), pair_house),
+    .id = "house")
+```
+
+```{r}
+ggplot(out) +
+  aes(Date, Room, col = Positive, group = Room, size = count) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ house, scale = "free") +
+  theme(legend.position = "none") +
+  ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
+
 ```
 
 ```{r}
 pair_hall <- function(object) {
   bind_rows(
     map(split(object, object$FAKEHOUS), pair_house),
-    .id = "house")
+    .id = "house") %>% 
+  mutate(house = paste0(house, " (", students, ")"),
+         Week = (epiweek(Date))) %>%
+  group_by(house, Week) %>%
+  summarize(count = sum(count)) %>%
+#  ungroup %>%
+#  arrange(Date) %>%
+#  group_by(house) %>%
+#  mutate(count = cumsum(count)) %>%
+  ungroup
 }
 ```
 
-```{r fig.width = 10, fig.height = 7}
-ggplot(pair_hall(house %>% filter(FAKEHALL == 10))) +
-  aes(Date, Room, col = Positive, group = Room) +
-  geom_line() +
-  geom_point() +
-  facet_wrap(~ house, scale = "free") +
-  theme(legend.position = "none") +
-  ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
+```{r}
+out <- pair_hall(house %>% filter(FAKEHALL == 10))
 ```
 
-```{r fig.width = 10, fig.height = 6}
-ggplot(pair_house(house %>% filter(FAKEHALL == 10))) +
-  aes(Date, Room, col = factor(FAKEHOUS), group = Room) +
-  geom_line() +
+```{r fig.width = 10, fig.height = 7}
+ggplot(out) +
+  aes(Week, house, size = count) +
+  geom_line(size = 1) +
   geom_point() +
+#  facet_wrap(~ house, scale = "free") +
   theme(legend.position = "none") +
   ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
 ```
@@ -244,14 +284,14 @@ ggplot(pair_house(house %>% filter(FAKEHALL == 10))) +
 ```{r}
 out <- 
   bind_rows(
-    map(split(house, house$FAKEHALL), pair_house),
+    map(split(house, house$FAKEHALL), pair_hall),
     .id = "hall")
 ```
 
 ```{r fig.width = 10, fig.height = 10}
 ggplot(out %>% filter(hall %in% c(10, 16))) +
-  aes(Date, Room, col = factor(FAKEHOUS), group = Room) +
-  geom_line() +
+  aes(Week, house, size = count) +
+  geom_line(size = 1) +
   geom_point() +
   facet_wrap(~ hall, scales = "free") +
   theme(legend.position = "none") +
@@ -260,8 +300,8 @@ ggplot(out %>% filter(hall %in% c(10, 16))) +
 
 ```{r fig.width = 10, fig.height = 10}
 ggplot(out) +
-  aes(Date, Room, col = factor(FAKEHOUS), group = Room) +
-  geom_line() +
+  aes(Week, house, size = count) +
+  geom_line(size = 1) +
   geom_point() +
   facet_wrap(~ hall, scales = "free") +
   theme(legend.position = "none") +
