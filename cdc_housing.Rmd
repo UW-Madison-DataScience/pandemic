@@ -152,7 +152,8 @@ house <- cdc_date %>%
   group_by(FAKEHALL, FAKEHOUS, Room,
            fakeroom, PatientID) %>%
   arrange(Date) %>%
-  summarize(Date = last(Date),
+  summarize(PrevDate = nth(Date, -2),
+            Date = last(Date),
             Positive = last(Positive)) %>%
   ungroup
 roomsize <- house %>%
@@ -197,26 +198,42 @@ room_rank <- function(fakeroom) {
   names(roomID) <- sort(unique(fakeroom))
   roomID[as.character(fakeroom)]
 }
-pair_house <- function(house) {
+pair_house <- function(house, neg = FALSE) {
   nhouse <- nrow(house)
   pos_pair <- house %>%
-    filter(Positive == 1) %>%
-    mutate(fakeroom = room_rank(fakeroom)) %>%
     arrange(Date, fakeroom)
+  if(!neg) {
+    pos_pair <- pos_pair %>%
+      filter(Positive == 1)
+  }
   pos_room <- pos_pair %>%
     group_by(fakeroom) %>%
     arrange(Date) %>%
-    summarize(Positive = n(),
+    summarize(Positive = sum(Positive),
               RoomID = Room) %>%
     ungroup %>%
     mutate(RoomID = 1 + RoomID - min(RoomID))
-  left_join(
-    pos_pair %>% select(-Positive),
-    pos_room,
-    by = "fakeroom") %>%
-  mutate(Positive = factor(Positive),
-         students = nhouse) %>%
-  count(students, Date, Room, RoomID, Positive, name = "count") 
+  out <- 
+    left_join(
+      pos_pair %>% select(-Positive),
+      pos_room,
+      by = "fakeroom") %>%
+    mutate(Positive = factor(Positive),
+          students = nhouse) %>%
+    count(students, PrevDate, Date, Room, RoomID, Positive, name = "count")
+  if(nrow(out)) {
+    out %>%
+    # jitter roommates if 2
+    group_by(Room) %>%
+    mutate(RoomID = ifelse(count == 2, RoomID + c(-0.2,0.2), RoomID)) %>%
+    ungroup %>%
+    pivot_longer(PrevDate:Date, names_to = "Prev", values_to = "Date") %>%
+    group_by(RoomID) %>%
+    mutate(RoomShape = as.character(1:2)) %>%
+    ungroup
+  } else {
+    out 
+  }
 }
 ```
 
@@ -226,11 +243,12 @@ out <- pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39))
 
 ```{r}
 ggplot(out) +
-  aes(Date, RoomID, col = Positive, group = RoomID) +
+  aes(Date, RoomID, col = Positive, group = RoomID, shape = RoomShape) +
   geom_line() +
   geom_point() +
 #  facet_wrap(~ house, scale = "free") +
   theme(legend.position = "none") +
+  scale_shape_manual(values = c(21,19)) +
   ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
 ```
 
@@ -241,10 +259,11 @@ out <- bind_rows(
     map(split(object, object$FAKEHOUS), pair_house),
     .id = "house")
 ggplot(out) +
-  aes(Date, RoomID, col = Positive, group = RoomID) +
+  aes(Date, RoomID, col = Positive, group = RoomID, shape = RoomShape) +
   geom_line() +
   geom_point() +
   facet_wrap(~ house) +
+  scale_shape_manual(values = c(21,19)) +
   theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle(paste("Positive Collection Dates by Room Burden across Youse Rooms in Hall", hallID))
 }
@@ -263,6 +282,7 @@ pair_hall <- function(object) {
   bind_rows(
     map(split(object, object$FAKEHOUS), pair_house),
     .id = "house") %>% 
+  filter(Prev == "Date") %>%
   mutate(house = paste0(house, " (", students, ")"),
          Week = (epiweek(Date))) %>%
   group_by(house, Week) %>%
