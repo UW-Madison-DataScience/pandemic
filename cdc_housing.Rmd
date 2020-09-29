@@ -29,7 +29,8 @@ filename <- scan("data/housing_data_url.txt", "text")
 cdc0 <- read.csv("data/matchforCDC-PHI.csv") %>%
   select(PatientID, 
          ResultDate, CollectionDate, ConfirmedDate, TracedDate,
-         Residence_Hall, fakeroom, FAKEHALL, FAKEHOUS, Positive) %>%
+         Residence_Hall, Hall, House_Name, Room,
+         fakeroom, FAKEHALL, FAKEHOUS, Positive) %>%
   filter(!is.na(PatientID)) %>%
   mutate(FAKEHALL = ifelse(is.na(FAKEHALL), -1, FAKEHALL),
          Campus = ifelse(Residence_Hall == "off campus", "off", "on")) %>%
@@ -148,15 +149,16 @@ house <- cdc_date %>%
   filter(Event == "CollectionDate",
          !is.na(Date),
          !is.na(Positive)) %>%
-  group_by(FAKEHALL, FAKEHOUS, fakeroom, PatientID) %>%
+  group_by(FAKEHALL, FAKEHOUS, Room,
+           fakeroom, PatientID) %>%
   arrange(Date) %>%
   summarize(Date = last(Date),
             Positive = last(Positive)) %>%
   ungroup
 roomsize <- house %>%
-  count(FAKEHALL, FAKEHOUS, fakeroom)
+  count(FAKEHALL, FAKEHOUS, fakeroom, Room)
 house <-
-  left_join(house, roomsize, by = c("FAKEHALL", "FAKEHOUS", "fakeroom")) %>%
+  left_join(house, roomsize, by = c("FAKEHALL", "FAKEHOUS", "fakeroom", "Room")) %>%
   filter(n == 2) %>%
   select(-n)
 ```
@@ -205,16 +207,16 @@ pair_house <- function(house) {
     group_by(fakeroom) %>%
     arrange(Date) %>%
     summarize(Positive = n(),
-              Room = first(Date)) %>%
+              RoomID = Room) %>%
     ungroup %>%
-    mutate(Room = rank(Room, ties.method = "random"))
+    mutate(RoomID = 1 + RoomID - min(RoomID))
   left_join(
     pos_pair %>% select(-Positive),
     pos_room,
     by = "fakeroom") %>%
   mutate(Positive = factor(Positive),
          students = nhouse) %>%
-  count(students, Date, Room, Positive, name = "count") 
+  count(students, Date, Room, RoomID, Positive, name = "count") 
 }
 ```
 
@@ -224,7 +226,7 @@ out <- pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39))
 
 ```{r}
 ggplot(out) +
-  aes(Date, Room, col = Positive, group = Room, size = count) +
+  aes(Date, RoomID, col = Positive, group = RoomID) +
   geom_line() +
   geom_point() +
 #  facet_wrap(~ house, scale = "free") +
@@ -233,21 +235,27 @@ ggplot(out) +
 ```
 
 ```{r}
-object <- house %>% filter(FAKEHALL == 10)
+plot_hall <- function(house, hallID) {
+object <- house %>% filter(FAKEHALL == hallID)
 out <- bind_rows(
     map(split(object, object$FAKEHOUS), pair_house),
     .id = "house")
-```
-
-```{r}
 ggplot(out) +
-  aes(Date, Room, col = Positive, group = Room, size = count) +
+  aes(Date, RoomID, col = Positive, group = RoomID) +
   geom_line() +
   geom_point() +
-  facet_wrap(~ house, scale = "free") +
-  theme(legend.position = "none") +
-  ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
+  facet_wrap(~ house) +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  ggtitle(paste("Positive Collection Dates by Room Burden across Youse Rooms in Hall", hallID))
+}
+```
 
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 10)
+```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 16)
 ```
 
 ```{r}
@@ -458,6 +466,7 @@ ggplot(
   geom_jitter(width = 0.05) +
   geom_path() +
   facet_wrap(~ FAKEHALL, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle("Time Course by Individual when Both Roommates Positive")
 ```
 
@@ -474,7 +483,7 @@ ggplot(tmp) +
   geom_point() +
   geom_path() +
   facet_wrap(~ FAKEHALL, scales = "free_y") +
-  theme(legend.position = "none") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   scale_color_manual(values = rep(2:7, length.out = length(unique(tmp$roomID)))) +
   ggtitle("Collection Dates by Individual when Both Roommates Positive")
 ```
@@ -499,6 +508,7 @@ ggplot(half_date) +
   geom_point() +
   geom_path() +
   facet_wrap(~ FAKEHALL, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle("Collection Dates by Individual when One Roommate is Positive")
 ```
 
@@ -514,10 +524,11 @@ ggplot(
   aes(Date, ID, col = Event, group = ID) +
   geom_jitter(width = 0.05, size = 2) +
   facet_wrap(~ fakeroom, scales = "free_y") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle("All Dates for Roommates Both Positive in Fake Hall 5")
 ```
 
-```{r fig.height = 9, fig.width = 10}
+```{r fig.height = 8, fig.width = 10}
 ggplot(
   left_join(
     cdc_date %>% 
@@ -531,7 +542,7 @@ ggplot(
   geom_point() +
   geom_path() +
   facet_wrap(~ FAKEHOUS, scales = "free_y") +
-  theme(legend.position = "none") +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   scale_color_manual(values = rep(2:7, length.out = length(unique(tmp$roomID)))) +
  ggtitle("Collection Dates for Fake Hall 16 Houses with Roommates Both Positive")
 ```
