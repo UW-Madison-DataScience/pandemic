@@ -190,7 +190,7 @@ ggplot(one_date) +
 
 ### Positive Cases within Rooms over Date
 
-Idea here is to just look at dates of positive cases and link cases within rooms by a horizontal line. First plot colors rooms by 1 or 2 positive cases. Other plots color rooms by house to look for patterns that cut across houses in halls.
+Idea here is to just look at dates of positive cases and link cases within rooms by a horizontal line. First plots colors rooms by number of positive cases. Early plots have two points per students for the most recent two tests. Later plots color rooms by house to look for patterns that cut across houses in halls.
 
 ```{r}
 room_rank <- function(fakeroom) {
@@ -209,63 +209,76 @@ pair_house <- function(house, neg = FALSE) {
   pos_room <- pos_pair %>%
     group_by(fakeroom) %>%
     arrange(Date) %>%
-    summarize(Positive = sum(Positive),
-              RoomID = Room) %>%
+    summarize(RoomPos = sum(Positive),
+              RoomID = Room[1]) %>%
     ungroup %>%
     mutate(RoomID = 1 + RoomID - min(RoomID))
   out <- 
     left_join(
-      pos_pair %>% select(-Positive),
+      pos_pair,
       pos_room,
       by = "fakeroom") %>%
-    mutate(Positive = factor(Positive),
-          students = nhouse) %>%
-    count(students, PrevDate, Date, Room, RoomID, Positive, name = "count")
+    mutate(RoomPos = factor(RoomPos),
+          students = nhouse)
   if(nrow(out)) {
     out %>%
-    # jitter roommates if 2
+    # jitter roommates if 2 entries per room
     group_by(Room) %>%
-    mutate(RoomID = ifelse(count == 2, RoomID + c(-0.2,0.2), RoomID)) %>%
+    mutate(RoomID = ifelse(!neg & RoomPos == 1, RoomID, RoomID + c(-0.2,0.2))) %>%
     ungroup %>%
     pivot_longer(PrevDate:Date, names_to = "Prev", values_to = "Date") %>%
     group_by(RoomID) %>%
-    mutate(RoomShape = as.character(1:2)) %>%
-    ungroup
+    mutate(TestResult = ifelse(neg & Positive == 0, rep(1,2), 1:2)) %>%
+    ungroup %>%
+    mutate(TestResult = c("Negative","Positive")[TestResult])
   } else {
     out 
   }
 }
 ```
 
-```{r}
-out <- pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39))
-```
-
-```{r}
-ggplot(out) +
-  aes(Date, RoomID, col = Positive, group = RoomID, shape = RoomShape) +
+```{r fig.height = 4}
+ggplot(pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39))) +
+  aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
   geom_line() +
   geom_point() +
 #  facet_wrap(~ house, scale = "free") +
-  theme(legend.position = "none") +
+#  theme(legend.position = "none") +
   scale_shape_manual(values = c(21,19)) +
-  ggtitle("Positive Collection Dates by Room Burden across Rooms in House")
+  ggtitle("Positive Students by Room Burden across Rooms in House")
+
+```
+
+```{r fig.height = 4}
+ggplot(pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39), TRUE)) +
+  aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
+  geom_line() +
+  geom_point() +
+#  facet_wrap(~ house, scale = "free") +
+#  theme(legend.position = "none") +
+  scale_shape_manual(values = c(21,19)) +
+  ggtitle("All Students by Room Burden across Rooms in House")
 ```
 
 ```{r}
-plot_hall <- function(house, hallID) {
+plot_hall <- function(house, hallID, neg = FALSE) {
 object <- house %>% filter(FAKEHALL == hallID)
 out <- bind_rows(
-    map(split(object, object$FAKEHOUS), pair_house),
+    map(split(object, object$FAKEHOUS), pair_house, neg),
     .id = "house")
+if(neg) {
+  gtitle <- "All Students by Room Burden across House Rooms in Hall"
+} else {
+  gtitle <- "Positive Students by Room Burden across House Rooms in Hall"
+}
 ggplot(out) +
-  aes(Date, RoomID, col = Positive, group = RoomID, shape = RoomShape) +
+  aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
   geom_line() +
   geom_point() +
   facet_wrap(~ house) +
   scale_shape_manual(values = c(21,19)) +
   theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  ggtitle(paste("Positive Collection Dates by Room Burden across Youse Rooms in Hall", hallID))
+  ggtitle(paste(gtitle, hallID))
 }
 ```
 
@@ -277,6 +290,14 @@ plot_hall(house, 10)
 plot_hall(house, 16)
 ```
 
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 10, TRUE)
+```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 16, TRUE)
+```
+
 ```{r}
 pair_hall <- function(object) {
   bind_rows(
@@ -286,7 +307,7 @@ pair_hall <- function(object) {
   mutate(house = paste0(house, " (", students, ")"),
          Week = (epiweek(Date))) %>%
   group_by(house, Week) %>%
-  summarize(count = sum(count)) %>%
+  summarize(count = sum(Positive)) %>%
 #  ungroup %>%
 #  arrange(Date) %>%
 #  group_by(house) %>%
