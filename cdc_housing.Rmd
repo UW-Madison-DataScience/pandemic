@@ -128,7 +128,7 @@ one %>%
   kprint()
 ```
 `FAKEHALL` 0 is aggregation of halls with fewer than 15 students reporting. Next plot summarizes by House (point) within Hall (facet) differences within rooms of last collection date; center = median, spread = IQR.
-Subsequent plots show individual students per horizontal line (sometimes with a little jitter), with roommates adjacent to each other. Coloring highlights time course of dates, positive vs negative, or room.
+Subsequent plots show individual students per horizontal line (sometimes with a little jitter), with roommates adjacent to each other. Coloring highlights time course of dates, positive vs negative, or room. Only considering rooms with exactly two roommates, as other sizes might be due to room transfers.
 
 \newpage
 
@@ -158,23 +158,30 @@ house <- cdc_date %>%
   ungroup
 roomsize <- house %>%
   count(FAKEHALL, FAKEHOUS, fakeroom, Room)
+# Restrict to rooms with exactly two students (avoiding turnover for now)
 house <-
   left_join(house, roomsize, by = c("FAKEHALL", "FAKEHOUS", "fakeroom", "Room")) %>%
   filter(n == 2) %>%
-  select(-n)
+  select(-n) %>%
+  group_by(FAKEHALL, FAKEHOUS) %>%
+  mutate(students = n()) %>%
+  ungroup %>%
+  mutate(house = FAKEHOUS,
+         FAKEHOUS = paste0(FAKEHOUS, " (", students, ")"))
 ```
 
 ```{r}
 one_date <- house %>%
-  group_by(FAKEHALL, FAKEHOUS, fakeroom) %>%
+  group_by(FAKEHALL, FAKEHOUS, house, fakeroom) %>%
   arrange(Date) %>%
   summarize(Delay = max(Date) - min(Date),
          Positive = sum(Positive),
          Date = first(Date)) %>%
   ungroup %>%
   filter(Positive == 2) %>%
+  # Kludge used once only
   group_by(FAKEHALL) %>%
-  mutate(roomID = factor(rank(10000 * FAKEHOUS + fakeroom))) %>%
+  mutate(roomID = factor(rank(10000 * house + fakeroom))) %>%
   ungroup
 ```
 
@@ -199,7 +206,6 @@ room_rank <- function(fakeroom) {
   roomID[as.character(fakeroom)]
 }
 pair_house <- function(house, neg = FALSE) {
-  nhouse <- nrow(house)
   pos_pair <- house %>%
     arrange(Date, fakeroom)
   if(!neg) {
@@ -218,8 +224,7 @@ pair_house <- function(house, neg = FALSE) {
       pos_pair,
       pos_room,
       by = "fakeroom") %>%
-    mutate(RoomPos = factor(RoomPos),
-          students = nhouse)
+    mutate(RoomPos = factor(RoomPos))
   if(nrow(out)) {
     out %>%
     # jitter roommates if 2 entries per room
@@ -232,14 +237,16 @@ pair_house <- function(house, neg = FALSE) {
     ungroup %>%
     mutate(TestResult = c("Negative","Positive")[TestResult])
   } else {
-    out 
+    out
   }
 }
 ```
 
 ```{r fig.height = 4}
-ggplot(pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39))) +
+ggplot(pair_house(house %>% filter(FAKEHALL == 10, grepl("^39 ", FAKEHOUS)))) +
   aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
+  geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
+             linetype = "dashed", col = "gray") +
   geom_line() +
   geom_point() +
 #  facet_wrap(~ house, scale = "free") +
@@ -250,8 +257,10 @@ ggplot(pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39))) +
 ```
 
 ```{r fig.height = 4}
-ggplot(pair_house(house %>% filter(FAKEHALL == 10, FAKEHOUS == 39), TRUE)) +
+ggplot(pair_house(house %>% filter(FAKEHALL == 10, grepl("39", FAKEHOUS)), TRUE)) +
   aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
+  geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
+             linetype = "dashed", col = "gray") +
   geom_line() +
   geom_point() +
 #  facet_wrap(~ house, scale = "free") +
@@ -273,11 +282,14 @@ if(neg) {
 }
 ggplot(out) +
   aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
+  geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
+             linetype = "dashed", col = "gray") +
   geom_line() +
   geom_point() +
   facet_wrap(~ house) +
   scale_shape_manual(values = c(21,19)) +
-  theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  theme(#legend.position = "none", 
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle(paste(gtitle, hallID))
 }
 ```
@@ -297,6 +309,104 @@ plot_hall(house, 10, TRUE)
 ```{r fig.width = 7, fig.height = 9}
 plot_hall(house, 16, TRUE)
 ```
+```{r}
+date_infected <- function(x) {
+  if(!any(is.na(x$Date))) {
+    y <- tibble(Date = seq(from = first(x$Date), to = last(x$Date), by = 1)) %>%
+      mutate(PatientID = x$PatientID[1],
+             Infected = seq(from = 0, to = 1, length.out = length(Date)))
+    full_join(x %>% select(-Date),y,by = "PatientID")
+  } else {
+    x %>% 
+      mutate(Infected = 1)
+  }
+}
+house_infected <- function(datehouse) {
+  datehouse <- split(datehouse, datehouse$PatientID)
+  bind_rows(
+    map(datehouse, date_infected),
+    .id = "PatientID")
+}
+```
+
+```{r eval=FALSE}
+out <- split(house, house$FAKEHALL)
+out <- bind_rows(
+  map(out, house_infected),
+  .id = "hall")
+```
+
+```{r}
+bead_house <- function(house) {
+  dates <- 
+    bind_rows(
+      map(
+        split(house, house$FAKEHOUS),
+        pair_house),
+      .id = "FAKEHOUS") %>%
+    filter(Positive > 0)
+  dates <- split(dates, dates$FAKEHOUS)
+  dates <- bind_rows(
+    map(dates, house_infected), .id = "FAKEHOUS") %>%
+    group_by(FAKEHALL, FAKEHOUS, Date, students) %>%
+    summarize(Infected = sum(Infected)) %>%
+    ungroup %>%
+    filter(!is.na(Date))
+  dates_total <- dates %>%
+    group_by(FAKEHOUS) %>%
+    summarize(CumInf = sum(Infected)) %>%
+    ungroup
+  left_join(
+    dates,
+    dates_total,
+    by = "FAKEHOUS") %>%
+    mutate(FAKEHOUS = reorder(FAKEHOUS, CumInf)) %>%
+    select(-CumInf)
+}
+```
+
+```{r}
+dates <- bind_rows(
+  map(
+    split(house, house$FAKEHALL),
+    bead_house),
+  .id = "FAKEHALL")
+```
+
+Inferred positives fill in ramped values (0 to 1) from last negative test to positive test, recognizing that student could have turned positive at any time between tests. Dots are proportional to number of inferred infectives.
+
+```{r}
+ggplot(dates %>% filter(FAKEHALL == 10)) +
+  aes(Date, FAKEHOUS, size = Infected) +
+  geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
+             linetype = "dashed", col = "gray") +
+  geom_point() +
+  geom_line(size = 1) +
+  ggtitle("Inferred Positives by House for FAKEHALL 10")
+```
+
+```{r}
+ggplot(dates %>% filter(FAKEHALL %in% c(10,16))) +
+  aes(Date, FAKEHOUS, size = Infected) +
+  geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
+             linetype = "dashed", col = "gray") +
+  geom_point() +
+  geom_line(size = 1) +
+  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  ggtitle("Inferred Positives by House for Larger Halls")
+```
+
+```{r fig.width = 10, fig.height = 10}
+ggplot(dates) +
+  aes(Date, FAKEHOUS, size = Infected) +
+  geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
+             linetype = "dashed", col = "gray") +
+  geom_point() +
+  geom_line(size = 0.5) +
+  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  ggtitle("Inferred Positives by House and FAKEHALL")
+```
+
 
 ```{r}
 pair_hall <- function(object) {
@@ -304,8 +414,7 @@ pair_hall <- function(object) {
     map(split(object, object$FAKEHOUS), pair_house),
     .id = "house") %>% 
   filter(Prev == "Date") %>%
-  mutate(house = paste0(house, " (", students, ")"),
-         Week = (epiweek(Date))) %>%
+  mutate(Week = (epiweek(Date))) %>%
   group_by(house, Week) %>%
   summarize(count = sum(Positive)) %>%
 #  ungroup %>%
