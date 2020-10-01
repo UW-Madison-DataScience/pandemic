@@ -39,6 +39,9 @@ cdc0 <- read.csv("data/matchforCDC-PHI.csv") %>%
 cdc0 <- cdc0 %>%
   filter(Campus == "on") %>%
   select(-Campus)
+# Collapse Hall 6 room numbers
+cdc0 <- cdc0 %>%
+  mutate(Room = ifelse(FAKEHALL == 6, (Room %% 100) + 20 * floor(Room / 100), Room))
 ```
 
 ```{r}
@@ -46,8 +49,13 @@ SmallHall <- (cdc0 %>%
   filter(Positive == 1) %>%
   count(FAKEHALL) %>%
   filter(n < 15))$FAKEHALL
+CleanHouse <- (cdc0 %>%
+  filter(Positive == 1,
+         FAKEHALL %in% SmallHall) %>%
+  count(FAKEHALL, FAKEHOUS))$FAKEHOUS
 cdc0 <- cdc0 %>%
-  mutate(FAKEHALL = ifelse(FAKEHALL %in% SmallHall, 0, FAKEHALL))
+  mutate(FAKEHALL = ifelse(FAKEHALL %in% SmallHall, 0, FAKEHALL)) %>%
+  filter((FAKEHALL != 0) | (FAKEHALL == 0 & FAKEHOUS %in% CleanHouse))
 ```
 
 ```{r}
@@ -128,19 +136,52 @@ one %>%
   kprint()
 ```
 `FAKEHALL` 0 is aggregation of halls with fewer than 15 students reporting. Next plot summarizes by House (point) within Hall (facet) differences within rooms of last collection date; center = median, spread = IQR.
-Subsequent plots show individual students per horizontal line (sometimes with a little jitter), with roommates adjacent to each other. Coloring highlights time course of dates, positive vs negative, or room. Only considering rooms with exactly two roommates, as other sizes might be due to room transfers.
+Subsequent plots show individual students per horizontal line (sometimes with a little jitter) organized by room. Coloring highlights time course of dates, positive vs negative, or room. Only considering rooms with exactly two roommates, as other sizes might be due to room transfers.
 
 \newpage
 
-### Days Between Collections for Roommates
+### Cumulative Counts of Positives by Collection Date
 
 ```{r}
-ggplot(one %>%
-         mutate(Positive = factor(Positive))) +
-  aes(center, spread, col = Positive, size = HouseSize) +
-  facet_wrap(~ FAKEHALL) +
-  geom_jitter(width = 0.1, alpha = 0.25) +
-  ggtitle("Days between Last Collection Dates per Room by House within Hall")
+cdc_sum <- cdc_date %>%
+  filter(Event == "CollectionDate", Positive == 1) %>%
+  arrange(Date) %>%
+  count(FAKEHALL, Date, name = "count") %>%
+  group_by(FAKEHALL) %>%
+  mutate(count = cumsum(count)) %>%
+  ungroup
+cdc_tot <- cdc_date %>%
+  filter(Event == "CollectionDate", Positive == 1) %>%
+  arrange(Date) %>%
+  count(Date, name = "all") %>%
+  mutate(all = cumsum(all))
+cdc_sum <- left_join(
+  cdc_sum,
+  cdc_tot,
+  by = "Date")
+```
+
+```{r}
+ggplot(cdc_sum) +
+  aes(Date, count, col = factor(FAKEHALL), group = factor(FAKEHALL)) +
+  scale_y_log10() +
+  theme(legend.position = "none") +
+  ylab("Cumulative Positive by Hall") +
+  geom_line(size = 2) +
+  ggtitle("Cumulative Positives by Hall over Time")
+```
+
+```{r}
+ggplot(cdc_sum %>% mutate(Hall = factor(FAKEHALL))) +
+  aes(all, count, col = Hall, group = Hall) +
+  geom_line(size = 2) +
+  geom_abline(slope = 1, intercept = 0, col = "gray") +
+  scale_x_log10() +
+  scale_y_log10() +
+  xlab("Cumulative Positive Overall") +
+  ylab("Cumulative Positive by Hall") +
+  theme(legend.position = "none") +
+  ggtitle("Breakdown of Cumulative Positives by Hall")
 ```
 
 ```{r}
@@ -185,16 +226,6 @@ one_date <- house %>%
   ungroup
 ```
 
-```{r}
-ggplot(one_date) +
-  aes(Date, Delay, col = roomID) +
-  geom_jitter() +
-  theme(legend.position = "none") +
-  scale_color_manual(values = rep(2:7, length.out = length(unique(one_date$roomID)))) +
-  facet_wrap(~ FAKEHALL) +
-  ggtitle("Delay in Collection Dates between Two Positive Roommates")
-```
-
 ### Positive Cases within Rooms over Date
 
 Idea here is to just look at dates of positive cases and link cases within rooms by a horizontal line. First plots colors rooms by number of positive cases. Early plots have two points per students for the most recent two tests. Later plots color rooms by house to look for patterns that cut across houses in halls.
@@ -224,7 +255,7 @@ pair_house <- function(house, neg = FALSE) {
       pos_pair,
       pos_room,
       by = "fakeroom") %>%
-    mutate(RoomPos = factor(RoomPos))
+    mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1", as.character(RoomPos)), c("2","1","0.1","0")))
   if(nrow(out)) {
     out %>%
     # jitter roommates if 2 entries per room
@@ -246,26 +277,30 @@ pair_house <- function(house, neg = FALSE) {
 ggplot(pair_house(house %>% filter(FAKEHALL == 10, grepl("^39 ", FAKEHOUS)))) +
   aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
   geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
-             linetype = "dashed", col = "gray") +
+             linetype = "dashed", col = "black") +
   geom_line() +
   geom_point() +
 #  facet_wrap(~ house, scale = "free") +
 #  theme(legend.position = "none") +
+  scale_color_manual(values = c("blue","red","darkgrey","lightgrey")) +
   scale_shape_manual(values = c(21,19)) +
   ggtitle("Positive Students by Room Burden across Rooms in House")
 
 ```
 
 ```{r fig.height = 4}
-ggplot(pair_house(house %>% filter(FAKEHALL == 10, grepl("39", FAKEHOUS)), TRUE)) +
+ggplot(pair_house(house %>% 
+                    filter(FAKEHALL == 10, grepl("39", FAKEHOUS)), TRUE) %>%
+         mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1", as.character(RoomPos)), c("2","1","0.1","0")))) +
   aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
   geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
-             linetype = "dashed", col = "gray") +
+             linetype = "dashed", col = "black") +
   geom_line() +
   geom_point() +
 #  facet_wrap(~ house, scale = "free") +
 #  theme(legend.position = "none") +
   scale_shape_manual(values = c(21,19)) +
+  scale_color_manual(values = c("blue","red","darkgrey","lightgrey")) +
   ggtitle("All Students by Room Burden across Rooms in House")
 ```
 
@@ -274,7 +309,8 @@ plot_hall <- function(house, hallID, neg = FALSE) {
 object <- house %>% filter(FAKEHALL == hallID)
 out <- bind_rows(
     map(split(object, object$FAKEHOUS), pair_house, neg),
-    .id = "house")
+    .id = "house") %>%
+  mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1", as.character(RoomPos)), c("2","1","0.1","0")))
 if(neg) {
   gtitle <- "All Students by Room Burden across House Rooms in Hall"
 } else {
@@ -283,23 +319,16 @@ if(neg) {
 ggplot(out) +
   aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
   geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
-             linetype = "dashed", col = "gray") +
+             linetype = "dashed", col = "black") +
   geom_line() +
   geom_point() +
   facet_wrap(~ house) +
   scale_shape_manual(values = c(21,19)) +
+  scale_color_manual(values = c("blue","red","darkgrey","lightgrey")) +
   theme(#legend.position = "none", 
     axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle(paste(gtitle, hallID))
 }
-```
-
-```{r fig.width = 7, fig.height = 9}
-plot_hall(house, 10)
-```
-
-```{r fig.width = 7, fig.height = 9}
-plot_hall(house, 16)
 ```
 
 ```{r fig.width = 7, fig.height = 9}
@@ -309,6 +338,35 @@ plot_hall(house, 10, TRUE)
 ```{r fig.width = 7, fig.height = 9}
 plot_hall(house, 16, TRUE)
 ```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 3, TRUE)
+```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 5, TRUE)
+```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 6, TRUE)
+```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 8, TRUE)
+```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 12, TRUE)
+```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 13, TRUE)
+```
+
+```{r fig.width = 7, fig.height = 9}
+plot_hall(house, 0, TRUE)
+```
+
 ```{r}
 date_infected <- function(x) {
   if(!any(is.na(x$Date))) {
@@ -429,7 +487,7 @@ pair_hall <- function(object) {
 out <- pair_hall(house %>% filter(FAKEHALL == 10))
 ```
 
-```{r fig.width = 10, fig.height = 7}
+```{r}
 ggplot(out) +
   aes(Week, house, size = count) +
   geom_line(size = 1) +
@@ -446,7 +504,7 @@ out <-
     .id = "hall")
 ```
 
-```{r fig.width = 10, fig.height = 10}
+```{r}
 ggplot(out %>% filter(hall %in% c(10, 16))) +
   aes(Week, house, size = count) +
   geom_line(size = 1) +
@@ -523,52 +581,6 @@ ggplot(out %>%
   ylab("Day Spread per House") +
   geom_point(alpha = 0.5) +
   ggtitle("Delay in Collection Dates for Same or Different Rooms in House")
-```
-
-\newpage
-
-### Cumulative Counts of Positives by Collection Date
-
-```{r}
-cdc_sum <- cdc_date %>%
-  filter(Event == "CollectionDate", Positive == 1) %>%
-  arrange(Date) %>%
-  count(FAKEHALL, Date, name = "count") %>%
-  group_by(FAKEHALL) %>%
-  mutate(count = cumsum(count)) %>%
-  ungroup
-cdc_tot <- cdc_date %>%
-  filter(Event == "CollectionDate", Positive == 1) %>%
-  arrange(Date) %>%
-  count(Date, name = "all") %>%
-  mutate(all = cumsum(all))
-cdc_sum <- left_join(
-  cdc_sum,
-  cdc_tot,
-  by = "Date")
-```
-
-```{r}
-ggplot(cdc_sum) +
-  aes(Date, count, col = factor(FAKEHALL), group = factor(FAKEHALL)) +
-  scale_y_log10() +
-  theme(legend.position = "none") +
-  ylab("Cumulative Positive by Hall") +
-  geom_line(size = 2) +
-  ggtitle("Cumulative Positives by Hall over Time")
-```
-
-```{r}
-ggplot(cdc_sum %>% mutate(Hall = factor(FAKEHALL))) +
-  aes(all, count, col = Hall, group = Hall) +
-  geom_line(size = 2) +
-  geom_abline(slope = 1, intercept = 0, col = "gray") +
-  scale_x_log10() +
-  scale_y_log10() +
-  xlab("Cumulative Positive Overall") +
-  ylab("Cumulative Positive by Hall") +
-  theme(legend.position = "none") +
-  ggtitle("Breakdown of Cumulative Positives by Hall")
 ```
 
 ### Summaries by student within rooms
@@ -697,6 +709,116 @@ ggplot(
  ggtitle("Collection Dates for Fake Hall 16 Houses with Roommates Both Positive")
 ```
 
+\newpage
+
+### Days Between Collections for Roommates
+
+```{r}
+ggplot(one %>%
+         mutate(Positive = factor(Positive))) +
+  aes(center, spread, col = Positive, size = HouseSize) +
+  facet_wrap(~ FAKEHALL) +
+  geom_jitter(width = 0.1, alpha = 0.25) +
+  ggtitle("Days between Last Collection Dates per Room by House within Hall")
+```
+
+```{r}
+# Get one record per student
+house <- cdc_date %>%
+  filter(Event == "CollectionDate",
+         !is.na(Date),
+         !is.na(Positive)) %>%
+  group_by(FAKEHALL, FAKEHOUS, Room,
+           fakeroom, PatientID) %>%
+  arrange(Date) %>%
+  summarize(PrevDate = nth(Date, -2),
+            Date = last(Date),
+            Positive = last(Positive)) %>%
+  ungroup
+roomsize <- house %>%
+  count(FAKEHALL, FAKEHOUS, fakeroom, Room)
+# Restrict to rooms with exactly two students (avoiding turnover for now)
+house <-
+  left_join(house, roomsize, by = c("FAKEHALL", "FAKEHOUS", "fakeroom", "Room")) %>%
+  filter(n == 2) %>%
+  select(-n) %>%
+  group_by(FAKEHALL, FAKEHOUS) %>%
+  mutate(students = n()) %>%
+  ungroup %>%
+  mutate(house = FAKEHOUS,
+         FAKEHOUS = paste0(FAKEHOUS, " (", students, ")"))
+```
+
+```{r}
+one_date <- house %>%
+  group_by(FAKEHALL, FAKEHOUS, house, fakeroom) %>%
+  arrange(Date) %>%
+  summarize(Delay = max(Date) - min(Date),
+         Positive = sum(Positive),
+         Date = first(Date)) %>%
+  ungroup %>%
+  filter(Positive == 2) %>%
+  # Kludge used once only
+  group_by(FAKEHALL) %>%
+  mutate(roomID = factor(rank(10000 * house + fakeroom))) %>%
+  ungroup
+```
+
+```{r}
+ggplot(one_date) +
+  aes(Date, Delay, col = roomID) +
+  geom_jitter() +
+  theme(legend.position = "none") +
+  scale_color_manual(values = rep(2:7, length.out = length(unique(one_date$roomID)))) +
+  facet_wrap(~ FAKEHALL) +
+  ggtitle("Delay in Collection Dates between Two Positive Roommates")
+```
+
+\newpage
+
+### Off Campus Summary
+
+```{r}
+# Need to download this file; could use boxr package
+off <- read.csv("data/matchforCDC-PHI.csv") %>%
+  filter(Residence_Hall == "off campus") %>%
+  select(PatientID, 
+         ResultDate, CollectionDate, ConfirmedDate, TracedDate, Positive) %>%
+  filter(!is.na(PatientID),
+         !is.na(Positive)) %>%
+  pivot_longer(ResultDate:TracedDate, names_to = "Event", values_to = "Date") %>%
+  distinct(PatientID, Date, Event, .keep_all = TRUE) %>%
+  mutate(Event = factor(Event, c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
+         Date = as.Date(Date, "%m/%d/%Y")) %>%
+  filter(Date > as.Date("2020-01-01"))
+```
+
+```{r}
+off %>%
+  filter(Event == "CollectionDate") %>%
+  count(Positive)
+```
+
+```{r}
+ggplot(off %>% filter(Event == "CollectionDate")) +
+  aes(Date, col = factor(Positive), group = Positive) +
+  geom_density()
+```
+
+
+```{r}
+ggplot(off %>%
+         filter(Event == "CollectionDate", Positive == 1) %>%
+         group_by(Date) %>%
+         summarize(Positive = sum(Positive)) %>%
+         ungroup %>%
+         arrange(Date) %>%
+         mutate(Positive = cumsum(Positive))) +
+  aes(Date, Positive) +
+  geom_line() +
+  scale_y_log10()
+```
+
 ```{r}
 knitr::knit_exit()
 ```
@@ -782,3 +904,116 @@ ggplot(cdc_date %>% filter(FAKEHALL == FAKEHALL[1], Event %in% c("ConfirmedDate"
   ggtitle("Negative & Positive")
 ```
 
+### Delay Code Never Debugged Completely
+
+
+```{r}
+# do this for each house
+# get median (and maybe IQR?) by same/diff and pos=0,1,2
+# compare across houses in hall
+# compare across halls
+room_rank <- function(fakeroom) {
+  roomID <- rank(sort(unique(fakeroom)))
+  names(roomID) <- sort(unique(fakeroom))
+  roomID[as.character(fakeroom)]
+}
+delta_house <- function(object) {
+  object <- object %>%
+    filter(Positive == 1) %>%
+    arrange(Date)
+  outer_lower <- function(x,y,f) {
+    out <- outer(x, y, f)
+    out[lower.tri(out)]
+  }
+  days <- outer_lower(object$Date, object$Date, "-")
+  room <- outer_lower(object$fakeroom, object$fakeroom, "==")
+  # Get first date
+  Date <- outer_lower(object$Date, object$Date, function(x,y) y)
+  # Get first and second room ID
+  roomID <- room_rank(object$fakeroom)
+  second <- outer(roomID, roomID, function(x,y) y)
+  first <- second[lower.tri(second)]
+  second <- t(second)[lower.tri(second)]
+  as_tibble(
+    data.frame(Date = Date,
+               days = days, 
+               room = c("Diff","Same")[1+room],
+               first = first,
+               second = second))
+}
+```
+
+```{r}
+delta_house(house %>% filter(FAKEHALL == 16, FAKEHOUS == 126)) %>%
+  arrange(second, days) %>%
+  group_by(second, room) %>%
+  filter(days == min(days)) %>%
+  ungroup %>%
+  arrange(Date)
+```
+
+```{r}
+delay_house <- function(house) {
+  diffs <- diff_house(house) %>%
+    filter(pos > 0)
+  # Sames have room with 1 or 2 positive
+  sames <- diffs %>%
+    filter(room == "Same") %>%
+    select(-room)
+  # Diffs are pairs 
+  diffs <- diffs %>%
+    filter(#days >= 0,
+           roomID %in% sames$roomID,
+           room == "Diff") %>%
+    select(-room)
+  left_join(diffs, sames, 
+            by = "roomID", 
+            suffix = c("_d","_s")) %>%
+    mutate(days = days_d - days_s,
+           pos_s = c("1.0","1.1","2.0","2.1")[2 * (pos_s - 1) + pos_d])
+}
+```
+
+```{r}
+delay_hall <- function(object) {
+  bind_rows(
+    map(split(object, object$FAKEHOUS), delay_house),
+    .id = "house")
+}
+```
+
+```{r}
+out <- delay_hall(house %>% filter(FAKEHALL == 16))
+```
+
+```{r}
+object <- house %>% filter(FAKEHALL == 8, FAKEHOUS == 36)
+roomID <- rank(sort(unique(object$fakeroom)))
+names(roomID) <- sort(unique(object$fakeroom))
+d <- diff_house(object)
+(tmp <- d %>% arrange(desc(pos), days) %>% filter(room == "Same", pos > 0))
+object %>% filter(fakeroom %in% names(roomID)[roomID %in% tmp$roomID])
+d %>% arrange(desc(pos), days)
+```
+
+```{r}
+ggplot(out %>% filter(house == 36)) +
+  aes(days, pos_s, col = factor(roomID)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_vline(xintercept = 0, col = "gray") +
+  geom_jitter(height = 0.25) +
+  ylab("Status of Proband Room to Status of Other Student") +
+  xlab("Difference in Days to Last Collection over Proband Roommate")
+```
+
+```{r}
+ggplot(out %>% filter(pos_s %in% c("1.1","2.1"))) +
+  aes(days, pos_s, col = factor(roomID)) +
+  geom_boxplot(outlier.shape = NA, col = 1) +
+  geom_vline(xintercept = 0, col = "gray") +
+  geom_jitter(height = 0.25) +
+  facet_wrap(~ house) +
+  theme(legend.position = "none") +
+  ylab("Status of Proband Room to Status of Other Student") +
+  xlab("Difference in Days to Last Collection over Proband Roommate")
+```
