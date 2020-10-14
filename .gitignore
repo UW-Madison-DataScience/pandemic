@@ -5,6 +5,7 @@
 .Rbuildignore
 *.pdf
 *.docx
+*.pptx
 *.html
 R/
 *.Rproj
@@ -14,3 +15,4 @@ R/
 rsconnect/shinyapps.io
 .DS_Store
 data/
+~/.boxr-oauth

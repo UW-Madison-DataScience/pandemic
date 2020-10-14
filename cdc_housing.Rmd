@@ -24,66 +24,22 @@ kprint <- function(x) {
 ```
 
 ```{r}
-filename <- scan("data/housing_data_url.txt", "text")
-# Need to download this file; could use boxr package
-cdc0 <- read.csv("data/matchforCDC-PHI.csv") %>%
-  select(PatientID, 
-         ResultDate, CollectionDate, ConfirmedDate, TracedDate,
-         Residence_Hall, Hall, House_Name, Room,
-         fakeroom, FAKEHALL, FAKEHOUS, Positive) %>%
-  filter(!is.na(PatientID)) %>%
-  mutate(FAKEHALL = ifelse(is.na(FAKEHALL), -1, FAKEHALL),
-         Campus = ifelse(Residence_Hall == "off campus", "off", "on")) %>%
-  select(-Residence_Hall)
-# Only a few off campus and no positives, so drop them.
-cdc0 <- cdc0 %>%
-  filter(Campus == "on") %>%
-  select(-Campus)
-# Collapse Hall 6 room numbers
-cdc0 <- cdc0 %>%
-  mutate(Room = ifelse(FAKEHALL == 6, (Room %% 100) + 20 * floor(Room / 100), Room))
-```
-
-```{r}
-SmallHall <- (cdc0 %>%
-  filter(Positive == 1) %>%
-  count(FAKEHALL) %>%
-  filter(n < 15))$FAKEHALL
-CleanHouse <- (cdc0 %>%
-  filter(Positive == 1,
-         FAKEHALL %in% SmallHall) %>%
-  count(FAKEHALL, FAKEHOUS))$FAKEHOUS
-cdc0 <- cdc0 %>%
-  mutate(FAKEHALL = ifelse(FAKEHALL %in% SmallHall, 0, FAKEHALL)) %>%
-  filter((FAKEHALL != 0) | (FAKEHALL == 0 & FAKEHOUS %in% CleanHouse))
-```
-
-```{r}
-cdc <- cdc0 %>%
-  filter(FAKEHALL != -1)
-```
-
-```{r}
-IDs <- sort(unique(cdc$PatientID))
-```
-
-```{r}
-cdc_date <- cdc %>%
-  pivot_longer(ResultDate:TracedDate, names_to = "Event", values_to = "Date") %>%
-  distinct(PatientID, Date, Event, .keep_all = TRUE) %>%
-  mutate(Event = factor(Event, c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
-         ID = match(PatientID, IDs),
-         Date = as.Date(Date, "%m/%d/%Y")) %>%
-  filter(Date > as.Date("2020-01-01"))
+filename <- "data/uhs_rand.csv"
+cdc_date <- read.csv(filename) %>%
+  mutate(Event = factor(Event,
+                        c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
+         Date = as.Date(Date)) %>%
+  filter(RANDHALL != -1,
+         Campus == "on")
 ```
 
 ```{r}
 countroom <- function(room) {
   out <- room %>%
-    mutate(PatientID = paste0("N", match(PatientID, sort(unique(PatientID)))))
-  if(length(unique(out$PatientID)) > 1) {
+    mutate(RANDID = paste0("N", match(RANDID, sort(unique(RANDID)))))
+  if(length(unique(out$RANDID)) > 1) {
     out <- out%>%
-      pivot_wider(names_from = "PatientID", values_from = "Positive") %>%
+      pivot_wider(names_from = "RANDID", values_from = "Positive") %>%
       arrange(Date) %>%
       fill(contains("N")) %>%
       pivot_longer(any_of(paste0("N",1:10)), 
@@ -100,11 +56,11 @@ countroom <- function(room) {
 ```{r}
 oneroom <- cdc_date %>%
   filter(Event == "CollectionDate") %>%
-  group_by(FAKEHALL, FAKEHOUS, fakeroom, PatientID) %>%
+  group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
   summarize(Date = ifelse(max(Positive) == 1, min(Date[Positive == 1]), max(Date)),
             Positive = max(Positive)) %>%
   ungroup %>%
-  group_by(FAKEHALL, FAKEHOUS, fakeroom) %>%
+  group_by(RANDHALL, RANDHOUS, RANDROOM) %>%
   arrange(Date) %>%
   mutate(Positive = cumsum(Positive),
          Date = max(Date) - min(Date),
@@ -114,7 +70,7 @@ oneroom <- cdc_date %>%
   filter(Roommates == 2,
          !is.na(Date))
 one <- oneroom %>%
-  group_by(FAKEHALL, FAKEHOUS, Positive) %>%
+  group_by(RANDHALL, RANDHOUS, Positive) %>%
   summarize(center = median(Date),
             spread = IQR(Date),
             HouseSize = n()) %>%
@@ -125,7 +81,7 @@ Number of rooms with 0, 1 or 2 students positive:
 
 ```{r}
 one %>%
-  group_by(FAKEHALL, Positive) %>%
+  group_by(RANDHALL, Positive) %>%
   summarize(HouseSize = sum(HouseSize)) %>%
   ungroup %>%
   mutate(Positive = paste0("Pos", Positive)) %>%
@@ -135,7 +91,7 @@ one %>%
   arrange(desc(PctPos)) %>%
   kprint()
 ```
-`FAKEHALL` 0 is aggregation of halls with fewer than 15 students reporting. Next plot summarizes by House (point) within Hall (facet) differences within rooms of last collection date; center = median, spread = IQR.
+`RANDHALL` 0 is aggregation of halls with fewer than 15 students reporting. Next plot summarizes by House (point) within Hall (facet) differences within rooms of last collection date; center = median, spread = IQR.
 Subsequent plots show individual students per horizontal line (sometimes with a little jitter) organized by room. Coloring highlights time course of dates, positive vs negative, or room. Only considering rooms with exactly two roommates, as other sizes might be due to room transfers.
 
 \newpage
@@ -146,8 +102,8 @@ Subsequent plots show individual students per horizontal line (sometimes with a 
 cdc_sum <- cdc_date %>%
   filter(Event == "CollectionDate", Positive == 1) %>%
   arrange(Date) %>%
-  count(FAKEHALL, Date, name = "count") %>%
-  group_by(FAKEHALL) %>%
+  count(RANDHALL, Date, name = "count") %>%
+  group_by(RANDHALL) %>%
   mutate(count = cumsum(count)) %>%
   ungroup
 cdc_tot <- cdc_date %>%
@@ -163,7 +119,7 @@ cdc_sum <- left_join(
 
 ```{r}
 ggplot(cdc_sum) +
-  aes(Date, count, col = factor(FAKEHALL), group = factor(FAKEHALL)) +
+  aes(Date, count, col = factor(RANDHALL), group = factor(RANDHALL)) +
   scale_y_log10() +
   theme(legend.position = "none") +
   ylab("Cumulative Positive by Hall") +
@@ -172,7 +128,7 @@ ggplot(cdc_sum) +
 ```
 
 ```{r}
-ggplot(cdc_sum %>% mutate(Hall = factor(FAKEHALL))) +
+ggplot(cdc_sum %>% mutate(Hall = factor(RANDHALL))) +
   aes(all, count, col = Hall, group = Hall) +
   geom_line(size = 2) +
   geom_abline(slope = 1, intercept = 0, col = "gray") +
@@ -190,30 +146,29 @@ house <- cdc_date %>%
   filter(Event == "CollectionDate",
          !is.na(Date),
          !is.na(Positive)) %>%
-  group_by(FAKEHALL, FAKEHOUS, Room,
-           fakeroom, PatientID) %>%
+  group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
   arrange(Date) %>%
   summarize(PrevDate = nth(Date, -2),
             Date = last(Date),
             Positive = last(Positive)) %>%
   ungroup
 roomsize <- house %>%
-  count(FAKEHALL, FAKEHOUS, fakeroom, Room)
+  count(RANDHALL, RANDHOUS, RANDROOM)
 # Restrict to rooms with exactly two students (avoiding turnover for now)
 house <-
-  left_join(house, roomsize, by = c("FAKEHALL", "FAKEHOUS", "fakeroom", "Room")) %>%
+  left_join(house, roomsize, by = c("RANDHALL", "RANDHOUS", "RANDROOM")) %>%
   filter(n == 2) %>%
   select(-n) %>%
-  group_by(FAKEHALL, FAKEHOUS) %>%
+  group_by(RANDHALL, RANDHOUS) %>%
   mutate(students = n()) %>%
   ungroup %>%
-  mutate(house = FAKEHOUS,
-         FAKEHOUS = paste0(FAKEHOUS, " (", students, ")"))
+  mutate(house = RANDHOUS,
+         RANDHOUS = paste0(RANDHOUS, " (", students, ")"))
 ```
 
 ```{r}
 one_date <- house %>%
-  group_by(FAKEHALL, FAKEHOUS, house, fakeroom) %>%
+  group_by(RANDHALL, RANDHOUS, house, RANDROOM) %>%
   arrange(Date) %>%
   summarize(Delay = max(Date) - min(Date),
          Positive = sum(Positive),
@@ -221,8 +176,8 @@ one_date <- house %>%
   ungroup %>%
   filter(Positive == 2) %>%
   # Kludge used once only
-  group_by(FAKEHALL) %>%
-  mutate(roomID = factor(rank(10000 * house + fakeroom))) %>%
+  group_by(RANDHALL) %>%
+  mutate(roomID = factor(rank(10000 * house + RANDROOM))) %>%
   ungroup
 ```
 
@@ -231,35 +186,36 @@ one_date <- house %>%
 Idea here is to just look at dates of positive cases and link cases within rooms by a horizontal line. First plots colors rooms by number of positive cases. Early plots have two points per students for the most recent two tests. Later plots color rooms by house to look for patterns that cut across houses in halls.
 
 ```{r}
-room_rank <- function(fakeroom) {
-  roomID <- rank(sort(unique(fakeroom)))
-  names(roomID) <- sort(unique(fakeroom))
-  roomID[as.character(fakeroom)]
+room_rank <- function(RANDROOM) {
+  roomID <- rank(sort(unique(RANDROOM)))
+  names(roomID) <- sort(unique(RANDROOM))
+  roomID[as.character(RANDROOM)]
 }
 pair_house <- function(house, neg = FALSE) {
   pos_pair <- house %>%
-    arrange(Date, fakeroom)
+    arrange(Date, RANDROOM)
   if(!neg) {
     pos_pair <- pos_pair %>%
       filter(Positive == 1)
   }
   pos_room <- pos_pair %>%
-    group_by(fakeroom) %>%
+    group_by(RANDROOM) %>%
     arrange(Date) %>%
     summarize(RoomPos = sum(Positive),
-              RoomID = Room[1]) %>%
+              RoomID = RANDROOM[1]) %>%
     ungroup %>%
     mutate(RoomID = 1 + RoomID - min(RoomID))
   out <- 
     left_join(
       pos_pair,
       pos_room,
-      by = "fakeroom") %>%
-    mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1", as.character(RoomPos)), c("2","1","0.1","0")))
+      by = "RANDROOM") %>%
+    mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1",
+                                   as.character(RoomPos)), c("2","1","0.1","0")))
   if(nrow(out)) {
     out %>%
     # jitter roommates if 2 entries per room
-    group_by(Room) %>%
+    group_by(RANDROOM) %>%
     mutate(RoomID = ifelse(!neg & RoomPos == 1, RoomID, RoomID + c(-0.2,0.2))) %>%
     ungroup %>%
     pivot_longer(PrevDate:Date, names_to = "Prev", values_to = "Date") %>%
@@ -274,7 +230,9 @@ pair_house <- function(house, neg = FALSE) {
 ```
 
 ```{r fig.height = 4}
-ggplot(pair_house(house %>% filter(FAKEHALL == 10, grepl("^39 ", FAKEHOUS)))) +
+ggplot(pair_house(house %>% 
+                    filter(RANDHALL == 10) %>%
+                    filter(RANDHOUS == RANDHOUS[1]))) +
   aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
   geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
              linetype = "dashed", col = "black") +
@@ -290,7 +248,9 @@ ggplot(pair_house(house %>% filter(FAKEHALL == 10, grepl("^39 ", FAKEHOUS)))) +
 
 ```{r fig.height = 4}
 ggplot(pair_house(house %>% 
-                    filter(FAKEHALL == 10, grepl("39", FAKEHOUS)), TRUE) %>%
+                    filter(RANDHALL == 10) %>%
+                    filter(RANDHOUS == RANDHOUS[1]),
+                  TRUE) %>%
          mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1", as.character(RoomPos)), c("2","1","0.1","0")))) +
   aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
   geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
@@ -306,9 +266,9 @@ ggplot(pair_house(house %>%
 
 ```{r}
 plot_hall <- function(house, hallID, neg = FALSE) {
-object <- house %>% filter(FAKEHALL == hallID)
+object <- house %>% filter(RANDHALL == hallID)
 out <- bind_rows(
-    map(split(object, object$FAKEHOUS), pair_house, neg),
+    map(split(object, object$RANDHOUS), pair_house, neg),
     .id = "house") %>%
   mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1", as.character(RoomPos)), c("2","1","0.1","0")))
 if(neg) {
@@ -371,24 +331,24 @@ plot_hall(house, 0, TRUE)
 date_infected <- function(x) {
   if(!any(is.na(x$Date))) {
     y <- tibble(Date = seq(from = first(x$Date), to = last(x$Date), by = 1)) %>%
-      mutate(PatientID = x$PatientID[1],
+      mutate(RANDID = x$RANDID[1],
              Infected = seq(from = 0, to = 1, length.out = length(Date)))
-    full_join(x %>% select(-Date),y,by = "PatientID")
+    full_join(x %>% select(-Date),y,by = "RANDID")
   } else {
     x %>% 
       mutate(Infected = 1)
   }
 }
 house_infected <- function(datehouse) {
-  datehouse <- split(datehouse, datehouse$PatientID)
+  datehouse <- split(datehouse, datehouse$RANDID)
   bind_rows(
     map(datehouse, date_infected),
-    .id = "PatientID")
+    .id = "RANDID")
 }
 ```
 
 ```{r eval=FALSE}
-out <- split(house, house$FAKEHALL)
+out <- split(house, house$RANDHALL)
 out <- bind_rows(
   map(out, house_infected),
   .id = "hall")
@@ -399,26 +359,26 @@ bead_house <- function(house) {
   dates <- 
     bind_rows(
       map(
-        split(house, house$FAKEHOUS),
+        split(house, house$RANDHOUS),
         pair_house),
-      .id = "FAKEHOUS") %>%
+      .id = "RANDHOUS") %>%
     filter(Positive > 0)
-  dates <- split(dates, dates$FAKEHOUS)
+  dates <- split(dates, dates$RANDHOUS)
   dates <- bind_rows(
-    map(dates, house_infected), .id = "FAKEHOUS") %>%
-    group_by(FAKEHALL, FAKEHOUS, Date, students) %>%
+    map(dates, house_infected), .id = "RANDHOUS") %>%
+    group_by(RANDHALL, RANDHOUS, Date, students) %>%
     summarize(Infected = sum(Infected)) %>%
     ungroup %>%
     filter(!is.na(Date))
   dates_total <- dates %>%
-    group_by(FAKEHOUS) %>%
+    group_by(RANDHOUS) %>%
     summarize(CumInf = sum(Infected)) %>%
     ungroup
   left_join(
     dates,
     dates_total,
-    by = "FAKEHOUS") %>%
-    mutate(FAKEHOUS = reorder(FAKEHOUS, CumInf)) %>%
+    by = "RANDHOUS") %>%
+    mutate(RANDHOUS = reorder(RANDHOUS, CumInf)) %>%
     select(-CumInf)
 }
 ```
@@ -426,50 +386,50 @@ bead_house <- function(house) {
 ```{r}
 dates <- bind_rows(
   map(
-    split(house, house$FAKEHALL),
+    split(house, house$RANDHALL),
     bead_house),
-  .id = "FAKEHALL")
+  .id = "RANDHALL")
 ```
 
 Inferred positives fill in ramped values (0 to 1) from last negative test to positive test, recognizing that student could have turned positive at any time between tests. Dots are proportional to number of inferred infectives.
 
 ```{r}
-ggplot(dates %>% filter(FAKEHALL == 10)) +
-  aes(Date, FAKEHOUS, size = Infected) +
+ggplot(dates %>% filter(RANDHALL == 10)) +
+  aes(Date, RANDHOUS, size = Infected) +
   geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
              linetype = "dashed", col = "gray") +
   geom_point() +
   geom_line(size = 1) +
-  ggtitle("Inferred Positives by House for FAKEHALL 10")
+  ggtitle("Inferred Positives by House for RANDHALL 10")
 ```
 
 ```{r}
-ggplot(dates %>% filter(FAKEHALL %in% c(10,16))) +
-  aes(Date, FAKEHOUS, size = Infected) +
+ggplot(dates %>% filter(RANDHALL %in% c(10,16))) +
+  aes(Date, RANDHOUS, size = Infected) +
   geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
              linetype = "dashed", col = "gray") +
   geom_point() +
   geom_line(size = 1) +
-  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  facet_wrap(~ RANDHALL, scales = "free_y") +
   ggtitle("Inferred Positives by House for Larger Halls")
 ```
 
 ```{r fig.width = 10, fig.height = 10}
 ggplot(dates) +
-  aes(Date, FAKEHOUS, size = Infected) +
+  aes(Date, RANDHOUS, size = Infected) +
   geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
              linetype = "dashed", col = "gray") +
   geom_point() +
   geom_line(size = 0.5) +
-  facet_wrap(~ FAKEHALL, scales = "free_y") +
-  ggtitle("Inferred Positives by House and FAKEHALL")
+  facet_wrap(~ RANDHALL, scales = "free_y") +
+  ggtitle("Inferred Positives by House and RANDHALL")
 ```
 
 
 ```{r}
 pair_hall <- function(object) {
   bind_rows(
-    map(split(object, object$FAKEHOUS), pair_house),
+    map(split(object, object$RANDHOUS), pair_house),
     .id = "house") %>% 
   filter(Prev == "Date") %>%
   mutate(Week = (epiweek(Date))) %>%
@@ -484,7 +444,7 @@ pair_hall <- function(object) {
 ```
 
 ```{r}
-out <- pair_hall(house %>% filter(FAKEHALL == 10))
+out <- pair_hall(house %>% filter(RANDHALL == 10))
 ```
 
 ```{r}
@@ -500,7 +460,7 @@ ggplot(out) +
 ```{r}
 out <- 
   bind_rows(
-    map(split(house, house$FAKEHALL), pair_hall),
+    map(split(house, house$RANDHALL), pair_hall),
     .id = "hall")
 ```
 
@@ -533,13 +493,13 @@ diff_house <- function(object) {
   object <- arrange(object, -Positive, Date)
   days <- outer(object$Date, object$Date, "-")
   days <- days[lower.tri(days)]
-  room <- outer(object$fakeroom, object$fakeroom, "==")
+  room <- outer(object$RANDROOM, object$RANDROOM, "==")
   room <- room[lower.tri(room)]
   pos <- outer(object$Positive, object$Positive, "+")
   pos <- pos[lower.tri(pos)]
-  roomID <- rank(sort(unique(object$fakeroom)))
-  names(roomID) <- sort(unique(object$fakeroom))
-  roomID <- outer(object$fakeroom, roomID[as.character(object$fakeroom)], function(x,y) y)
+  roomID <- rank(sort(unique(object$RANDROOM)))
+  names(roomID) <- sort(unique(object$RANDROOM))
+  roomID <- outer(object$RANDROOM, roomID[as.character(object$RANDROOM)], function(x,y) y)
   roomID <- roomID[lower.tri(roomID)]
   as_tibble(
     data.frame(days = days, 
@@ -552,7 +512,7 @@ diff_house <- function(object) {
 ```{r}
 diff_hall <- function(object) {
   bind_rows(
-    map(split(object, object$FAKEHOUS), diff_house),
+    map(split(object, object$RANDHOUS), diff_house),
     .id = "house") %>%
   group_by(house, room, pos) %>%
   summarize(days_iqr = IQR(days),
@@ -565,7 +525,7 @@ diff_hall <- function(object) {
 ```{r}
 out <- 
   bind_rows(
-    map(split(house, house$FAKEHALL), diff_hall),
+    map(split(house, house$RANDHALL), diff_hall),
     .id = "hall")
 ```
 
@@ -588,46 +548,45 @@ ggplot(out %>%
 ```{r}
 both <- oneroom %>%
   filter(Positive == 2) %>%
-  select(FAKEHALL, FAKEHOUS, fakeroom, PatientID)
+  select(RANDHALL, RANDHOUS, RANDROOM, RANDID)
 half <- oneroom %>%
   filter(Positive == 1) %>%
-  select(FAKEHALL, FAKEHOUS, fakeroom, PatientID)
+  select(RANDHALL, RANDHOUS, RANDROOM, RANDID)
 cdcID <- cdc_date %>% 
-  filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS)) %>%
-  group_by(FAKEHALL, FAKEHOUS, PatientID) %>%
+  filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(both$RANDROOM, both$RANDHALL, both$RANDHOUS)) %>%
+  group_by(RANDHALL, RANDHOUS, RANDID) %>%
   summarize(Date = min(Date),
-            fakeroom = fakeroom[1]) %>%
+            RANDROOM = RANDROOM[1]) %>%
   ungroup %>%
-  group_by(FAKEHALL) %>%
-  mutate(ID = 0.25 + rank(10000 * FAKEHOUS + fakeroom, ties.method = "random") / 2,
-         roomID = rank(10000 * FAKEHOUS + fakeroom)) %>%
+  group_by(RANDHALL) %>%
+  mutate(ID = 0.25 + rank(10000 * RANDHOUS + RANDROOM, ties.method = "random") / 2,
+         roomID = rank(10000 * RANDHOUS + RANDROOM)) %>%
   ungroup %>%
-  select(FAKEHALL, PatientID, ID, roomID)
+  select(RANDHALL, RANDID, ID, roomID)
 cdcIDh <- cdc_date %>% 
-  filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(half$fakeroom, half$FAKEHALL, half$FAKEHOUS)) %>%
-  group_by(FAKEHALL, FAKEHOUS, PatientID) %>%
+  filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(half$RANDROOM, half$RANDHALL, half$RANDHOUS)) %>%
+  group_by(RANDHALL, RANDHOUS, RANDID) %>%
   summarize(Date = min(Date),
-            fakeroom = fakeroom[1]) %>%
+            RANDROOM = RANDROOM[1]) %>%
   ungroup %>%
-  group_by(FAKEHALL) %>%
-  mutate(ID = 0.25 +rank(10000 * FAKEHOUS + fakeroom, ties.method = "random") / 2,
-         roomID = rank(10000 * FAKEHOUS + fakeroom)) %>%
+  group_by(RANDHALL) %>%
+  mutate(ID = 0.25 +rank(10000 * RANDHOUS + RANDROOM, ties.method = "random") / 2,
+         roomID = rank(10000 * RANDHOUS + RANDROOM)) %>%
   ungroup %>%
-  select(FAKEHALL, PatientID, ID, roomID)
+  select(RANDHALL, RANDID, ID, roomID)
 ```
 
 ```{r fig.width = 9}
 ggplot(
   left_join(
     cdc_date %>% 
-      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS)) %>%
-      select(-ID),
+      filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(both$RANDROOM, both$RANDHALL, both$RANDHOUS)),
     cdcID,
-    by = c("FAKEHALL", "PatientID"))) +
+    by = c("RANDHALL", "RANDID"))) +
   aes(Date, ID, col = Event, group = ID) +
   geom_jitter(width = 0.05) +
   geom_path() +
-  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  facet_wrap(~ RANDHALL, scales = "free_y") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle("Time Course by Individual when Both Roommates Positive")
 ```
@@ -635,16 +594,15 @@ ggplot(
 ```{r}
 tmp <- left_join(
     cdc_date %>% 
-      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS),
-             Event == "CollectionDate") %>%
-      select(-ID),
+      filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(both$RANDROOM, both$RANDHALL, both$RANDHOUS),
+             Event == "CollectionDate"),
     cdcID,
-    by = c("FAKEHALL", "PatientID"))
+    by = c("RANDHALL", "RANDID"))
 ggplot(tmp) +
   aes(Date, ID, col = factor(roomID), group = ID) +
   geom_point() +
   geom_path() +
-  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  facet_wrap(~ RANDHALL, scales = "free_y") +
   theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   scale_color_manual(values = rep(2:7, length.out = length(unique(tmp$roomID)))) +
   ggtitle("Collection Dates by Individual when Both Roommates Positive")
@@ -653,12 +611,11 @@ ggplot(tmp) +
 ```{r}
 half_date <- left_join(
     cdc_date %>% 
-      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(half$fakeroom, half$FAKEHALL, half$FAKEHOUS),
-             Event == "CollectionDate") %>%
-      select(-ID),
+      filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(half$RANDROOM, half$RANDHALL, half$RANDHOUS),
+             Event == "CollectionDate"),
     cdcIDh,
-    by = c("FAKEHALL", "PatientID")) %>%
-  group_by(PatientID) %>%
+    by = c("RANDHALL", "RANDID")) %>%
+  group_by(RANDID) %>%
   mutate(Positive = c("Negative","Positive")[1 + max(Positive)]) %>%
   ungroup
 ```
@@ -669,7 +626,7 @@ ggplot(half_date) +
   aes(Date, ID, col = Positive, group = ID) +
   geom_point() +
   geom_path() +
-  facet_wrap(~ FAKEHALL, scales = "free_y") +
+  facet_wrap(~ RANDHALL, scales = "free_y") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle("Collection Dates by Individual when One Roommate is Positive")
 ```
@@ -678,14 +635,13 @@ ggplot(half_date) +
 ggplot(
   left_join(
     cdc_date %>% 
-      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS)) %>%
-      select(-ID),
+      filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(both$RANDROOM, both$RANDHALL, both$RANDHOUS)),
     cdcID,
-    by = c("FAKEHALL", "PatientID")) %>%
-    filter(FAKEHALL == 5, fakeroom != 14933)) + # not sure why this shows up
+    by = c("RANDHALL", "RANDID")) %>%
+    filter(RANDHALL == 5, RANDROOM != 14933)) + # not sure why this shows up
   aes(Date, ID, col = Event, group = ID) +
   geom_jitter(width = 0.05, size = 2) +
-  facet_wrap(~ fakeroom, scales = "free_y") +
+  facet_wrap(~ RANDROOM, scales = "free_y") +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   ggtitle("All Dates for Roommates Both Positive in Fake Hall 5")
 ```
@@ -694,16 +650,15 @@ ggplot(
 ggplot(
   left_join(
     cdc_date %>% 
-      filter(paste(fakeroom, FAKEHALL, FAKEHOUS) %in% paste(both$fakeroom, both$FAKEHALL, both$FAKEHOUS),
-             Event == "CollectionDate") %>%
-      select(-ID),
+      filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(both$RANDROOM, both$RANDHALL, both$RANDHOUS),
+             Event == "CollectionDate"),
     cdcID,
-    by = c("FAKEHALL", "PatientID")) %>%
-    filter(FAKEHALL == 16)) +
+    by = c("RANDHALL", "RANDID")) %>%
+    filter(RANDHALL == 16)) +
   aes(Date, ID, col = factor(roomID), group = ID) +
   geom_point() +
   geom_path() +
-  facet_wrap(~ FAKEHOUS, scales = "free_y") +
+  facet_wrap(~ RANDHOUS, scales = "free_y") +
   theme(legend.position = "none", axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
   scale_color_manual(values = rep(2:7, length.out = length(unique(tmp$roomID)))) +
  ggtitle("Collection Dates for Fake Hall 16 Houses with Roommates Both Positive")
@@ -717,7 +672,7 @@ ggplot(
 ggplot(one %>%
          mutate(Positive = factor(Positive))) +
   aes(center, spread, col = Positive, size = HouseSize) +
-  facet_wrap(~ FAKEHALL) +
+  facet_wrap(~ RANDHALL) +
   geom_jitter(width = 0.1, alpha = 0.25) +
   ggtitle("Days between Last Collection Dates per Room by House within Hall")
 ```
@@ -728,30 +683,29 @@ house <- cdc_date %>%
   filter(Event == "CollectionDate",
          !is.na(Date),
          !is.na(Positive)) %>%
-  group_by(FAKEHALL, FAKEHOUS, Room,
-           fakeroom, PatientID) %>%
+  group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
   arrange(Date) %>%
   summarize(PrevDate = nth(Date, -2),
             Date = last(Date),
             Positive = last(Positive)) %>%
   ungroup
 roomsize <- house %>%
-  count(FAKEHALL, FAKEHOUS, fakeroom, Room)
+  count(RANDHALL, RANDHOUS, RANDROOM)
 # Restrict to rooms with exactly two students (avoiding turnover for now)
 house <-
-  left_join(house, roomsize, by = c("FAKEHALL", "FAKEHOUS", "fakeroom", "Room")) %>%
+  left_join(house, roomsize, by = c("RANDHALL", "RANDHOUS", "RANDROOM")) %>%
   filter(n == 2) %>%
   select(-n) %>%
-  group_by(FAKEHALL, FAKEHOUS) %>%
+  group_by(RANDHALL, RANDHOUS) %>%
   mutate(students = n()) %>%
   ungroup %>%
-  mutate(house = FAKEHOUS,
-         FAKEHOUS = paste0(FAKEHOUS, " (", students, ")"))
+  mutate(house = RANDHOUS,
+         RANDHOUS = paste0(RANDHOUS, " (", students, ")"))
 ```
 
 ```{r}
 one_date <- house %>%
-  group_by(FAKEHALL, FAKEHOUS, house, fakeroom) %>%
+  group_by(RANDHALL, RANDHOUS, house, RANDROOM) %>%
   arrange(Date) %>%
   summarize(Delay = max(Date) - min(Date),
          Positive = sum(Positive),
@@ -759,8 +713,8 @@ one_date <- house %>%
   ungroup %>%
   filter(Positive == 2) %>%
   # Kludge used once only
-  group_by(FAKEHALL) %>%
-  mutate(roomID = factor(rank(10000 * house + fakeroom))) %>%
+  group_by(RANDHALL) %>%
+  mutate(roomID = factor(rank(10000 * house + RANDROOM))) %>%
   ungroup
 ```
 
@@ -770,7 +724,7 @@ ggplot(one_date) +
   geom_jitter() +
   theme(legend.position = "none") +
   scale_color_manual(values = rep(2:7, length.out = length(unique(one_date$roomID)))) +
-  facet_wrap(~ FAKEHALL) +
+  facet_wrap(~ RANDHALL) +
   ggtitle("Delay in Collection Dates between Two Positive Roommates")
 ```
 
@@ -780,17 +734,13 @@ ggplot(one_date) +
 
 ```{r}
 # Need to download this file; could use boxr package
-off <- read.csv("data/matchforCDC-PHI.csv") %>%
-  filter(Residence_Hall == "off campus") %>%
-  select(PatientID, 
-         ResultDate, CollectionDate, ConfirmedDate, TracedDate, Positive) %>%
-  filter(!is.na(PatientID),
-         !is.na(Positive)) %>%
-  pivot_longer(ResultDate:TracedDate, names_to = "Event", values_to = "Date") %>%
-  distinct(PatientID, Date, Event, .keep_all = TRUE) %>%
-  mutate(Event = factor(Event, c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
-         Date = as.Date(Date, "%m/%d/%Y")) %>%
-  filter(Date > as.Date("2020-01-01"))
+off <- read.csv(filename) %>%
+  filter(Campus == "off") %>%
+  select(RANDID, Date, Event, Positive) %>%
+  mutate(Event = factor(Event,
+                        c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
+         Date = as.Date(Date)) %>%
+  filter(!is.na(Positive))
 ```
 
 ```{r}
@@ -826,7 +776,7 @@ knitr::knit_exit()
 ### Older Stuff
 
 ```{r}
-tmp <- (cdc %>% count(PatientID, name = "tests") %>% count(tests) %>% t)
+tmp <- (cdc %>% count(RANDID, name = "tests") %>% count(tests) %>% t)
 colnames(tmp) <- rep("", ncol(tmp))
 tmp
 ```
@@ -834,12 +784,12 @@ tmp
 
 ```{r}
 tmp <- cdc %>% 
-  count(FAKEHALL, FAKEHOUS, PatientID, name = "count") %>%
+  count(RANDHALL, RANDHOUS, RANDID, name = "count") %>%
   mutate(count = factor(ifelse(count > 5, ">5", as.character(count)), c(1:5, ">5"))) %>%
-  count(FAKEHALL, FAKEHOUS, count) %>%
-  mutate(FAKEHALL = factor(FAKEHALL))
+  count(RANDHALL, RANDHOUS, count) %>%
+  mutate(RANDHALL = factor(RANDHALL))
 ggplot(tmp) +
-  aes(count, n, col = FAKEHALL, group = FAKEHALL) +
+  aes(count, n, col = RANDHALL, group = RANDHALL) +
   geom_point() +
   geom_path() +
   scale_y_log10() +
@@ -850,7 +800,7 @@ ggplot(tmp) +
 ```
 
 ```{r}
-ggplot(cdc_date %>% filter(PatientID %in% pos, FAKEHALL == FAKEHALL[1])) +
+ggplot(cdc_date %>% filter(RANDID %in% pos, RANDHALL == RANDHALL[1])) +
   aes(Date, ID, col = Event, group = ID) +
   geom_point() +
   geom_path() +
@@ -859,7 +809,7 @@ ggplot(cdc_date %>% filter(PatientID %in% pos, FAKEHALL == FAKEHALL[1])) +
 
 
 ```{r}
-ggplot(cdc_date %>% filter(PatientID %in% pos, FAKEHALL == FAKEHALL[1], Event %in% c("ConfirmedDate", "TracedDate"))) +
+ggplot(cdc_date %>% filter(RANDID %in% pos, RANDHALL == RANDHALL[1], Event %in% c("ConfirmedDate", "TracedDate"))) +
   aes(Date, ID, col = Event, group = ID) +
   geom_point() +
   geom_path() +
@@ -869,14 +819,14 @@ ggplot(cdc_date %>% filter(PatientID %in% pos, FAKEHALL == FAKEHALL[1], Event %i
 
 ```{r}
 ggplot(cdc_date %>% 
-         filter(PatientID %in% pos, 
-                FAKEHALL == FAKEHALL[1], 
+         filter(RANDID %in% pos, 
+                RANDHALL == RANDHALL[1], 
                 Event %in% c("ConfirmedDate", "TracedDate")) %>%
-         mutate(ID = idf(ID, Date, FAKEHOUS))) +
+         mutate(ID = idf(ID, Date, RANDHOUS))) +
   aes(Date, ID, col = Event, group = ID) +
   geom_point() +
   geom_path() +
-  facet_wrap(~ FAKEHOUS, scales = "free_y") +
+  facet_wrap(~ RANDHOUS, scales = "free_y") +
   ggtitle("Positive")
 ```
 
@@ -884,9 +834,9 @@ Number of roommates positive by house.
 
 ```{r}
 cdc_date %>%
-  filter(PatientID %in% pos, FAKEHALL == FAKEHALL[1], Event %in% c("ConfirmedDate", "TracedDate")) %>%
-  count(fakeroom, FAKEHOUS, name = "nc") %>%
-  count(FAKEHOUS, nc) %>%
+  filter(RANDID %in% pos, RANDHALL == RANDHALL[1], Event %in% c("ConfirmedDate", "TracedDate")) %>%
+  count(RANDROOM, RANDHOUS, name = "nc") %>%
+  count(RANDHOUS, nc) %>%
   mutate(nc = paste0("R", nc)) %>%
   pivot_wider(names_from = "nc", values_from = "n", values_fill = 0) %>%
   arrange(desc(R1 + R2 + R3 + R4))
@@ -895,12 +845,12 @@ Now would like to look at both positive and negative by house and room to see pa
 
 
 ```{r}
-ggplot(cdc_date %>% filter(FAKEHALL == FAKEHALL[1], Event %in% c("ConfirmedDate")) %>%
+ggplot(cdc_date %>% filter(RANDHALL == RANDHALL[1], Event %in% c("ConfirmedDate")) %>%
          mutate(Outcome = c("Negative","Positive")[1+Positive])) +
   aes(Date, ID, col = Outcome, group = ID) +
   geom_point() +
   geom_path() +
-  facet_wrap(~ FAKEHOUS, scales = "free_y") +
+  facet_wrap(~ RANDHOUS, scales = "free_y") +
   ggtitle("Negative & Positive")
 ```
 
@@ -912,10 +862,10 @@ ggplot(cdc_date %>% filter(FAKEHALL == FAKEHALL[1], Event %in% c("ConfirmedDate"
 # get median (and maybe IQR?) by same/diff and pos=0,1,2
 # compare across houses in hall
 # compare across halls
-room_rank <- function(fakeroom) {
-  roomID <- rank(sort(unique(fakeroom)))
-  names(roomID) <- sort(unique(fakeroom))
-  roomID[as.character(fakeroom)]
+room_rank <- function(RANDROOM) {
+  roomID <- rank(sort(unique(RANDROOM)))
+  names(roomID) <- sort(unique(RANDROOM))
+  roomID[as.character(RANDROOM)]
 }
 delta_house <- function(object) {
   object <- object %>%
@@ -926,11 +876,11 @@ delta_house <- function(object) {
     out[lower.tri(out)]
   }
   days <- outer_lower(object$Date, object$Date, "-")
-  room <- outer_lower(object$fakeroom, object$fakeroom, "==")
+  room <- outer_lower(object$RANDROOM, object$RANDROOM, "==")
   # Get first date
   Date <- outer_lower(object$Date, object$Date, function(x,y) y)
   # Get first and second room ID
-  roomID <- room_rank(object$fakeroom)
+  roomID <- room_rank(object$RANDROOM)
   second <- outer(roomID, roomID, function(x,y) y)
   first <- second[lower.tri(second)]
   second <- t(second)[lower.tri(second)]
@@ -944,7 +894,7 @@ delta_house <- function(object) {
 ```
 
 ```{r}
-delta_house(house %>% filter(FAKEHALL == 16, FAKEHOUS == 126)) %>%
+delta_house(house %>% filter(RANDHALL == 16, RANDHOUS == 126)) %>%
   arrange(second, days) %>%
   group_by(second, room) %>%
   filter(days == min(days)) %>%
@@ -977,22 +927,22 @@ delay_house <- function(house) {
 ```{r}
 delay_hall <- function(object) {
   bind_rows(
-    map(split(object, object$FAKEHOUS), delay_house),
+    map(split(object, object$RANDHOUS), delay_house),
     .id = "house")
 }
 ```
 
 ```{r}
-out <- delay_hall(house %>% filter(FAKEHALL == 16))
+out <- delay_hall(house %>% filter(RANDHALL == 16))
 ```
 
 ```{r}
-object <- house %>% filter(FAKEHALL == 8, FAKEHOUS == 36)
-roomID <- rank(sort(unique(object$fakeroom)))
-names(roomID) <- sort(unique(object$fakeroom))
+object <- house %>% filter(RANDHALL == 8, RANDHOUS == 36)
+roomID <- rank(sort(unique(object$RANDROOM)))
+names(roomID) <- sort(unique(object$RANDROOM))
 d <- diff_house(object)
 (tmp <- d %>% arrange(desc(pos), days) %>% filter(room == "Same", pos > 0))
-object %>% filter(fakeroom %in% names(roomID)[roomID %in% tmp$roomID])
+object %>% filter(RANDROOM %in% names(roomID)[roomID %in% tmp$roomID])
 d %>% arrange(desc(pos), days)
 ```
 

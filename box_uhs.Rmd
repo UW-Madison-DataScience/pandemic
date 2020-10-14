@@ -1,0 +1,338 @@
+---
+title: "BOX UHS Download"
+output:
+  html_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, comment = "")
+```
+
+```{r}
+library(tidyverse)
+kprint <- function(x) {
+  if(interactive()) {
+    print(x)
+  } else {
+    knitr::kable(x)
+  }
+}
+```
+
+```{r eval=FALSE}
+From: "wiscit@doit.wisc.edu" <wiscit@doit.wisc.edu>
+Date: Tuesday, October 13, 2020 at 1:13 PM
+
+The Box Client ID and Client Secret identify the Box-app that you setup to connect to your Box account. This something that you would need to create for yourself via the Box Dev console:
+ 
+https://uwmadison.app.box.com/developers/console
+ 
+The UW-Madison Box team does not offer any custom Box development or consulting services but here are some links that might help you get started:
+ 
+https://developer.box.com/guides/authentication/select/
+ 
+https://developer.box.com/guides/applications/custom-apps/
+ 
+Please keep in mind that the only authorization type that is supported with UW-Madison Box is Oauth 2.0 authentication:
+ 
+https://kb.wisc.edu/103326
+ 
+Finally, be aware that we can no longer offer unlimited storage with the Box service. Beginning on 6/15/2020 all accounts have a storage quota set. For questions regarding that change please see our Contract & Quota FAQ: 
+ 
+https://kb.wisc.edu/102615
+ 
+Please let me know if you have additional questions. 
+ 
+Regards,
+ 
+Jeannine 
+```
+
+```{r eval=FALSE}
+library(boxr)
+# Need to download this file; could use boxr package
+# Need Client Secret, which I don't yet understand.
+box_auth("byandell@wisc.edu")
+filename <- scan("data/housing_data_url.txt", "text")
+cdc0 <- box_read(filename)
+```
+
+```{r}
+cdc0 <- read.csv("data/matchforCDC-PHI.csv")
+```
+
+### Useful Columns for Modelers
+
+The following columns would be useful to share with campus modelers. They appear to contain no PHI or PII but have sufficient data for modelers to study patterns of infection. Please note that this is based on data through 5 October 2020. See details below for study of fields
+
+- RANDID (carefully randomized from PatientID)
+- Group (identifies faculty)
+- ResultDate, CollectionDate, ConfirmedDate, TracedDate (dropping time of day)
+- QuarantineStatus, HasSymptoms, NumberOfContacts
+- RANDHALL (FAKEHALL adding in 3 small halls and moving all small halls to 0)
+- RANDHOUS (new randomization within hall and across houses and floors)
+- RANDROOM (room number modulus 100 to remove floor)
+- Positive
+
+### Study of Halls, Houses and Rooms
+
+`Residence_Hall`, `Hall` and `FAKEHALL` are related but do not have identical information. It is possible the discrepancy between `Residence_Hall` and `Hall` indicates students who moved.
+
+```{r}
+cdc0 %>%
+  count(Residence_Hall, Hall) %>%
+  filter(Residence_Hall != Hall) %>%
+  arrange(desc(n))
+```
+The `FAKEHALL` largely captures the `Hall`, with the exception of missing values for a few small halls (Barnard, Davis, Merit).
+
+```{r}
+full_join(
+  cdc0 %>%
+    distinct(Hall, FAKEHALL, House_Name, FAKEHOUS) %>%
+    count(Hall, FAKEHALL, name = "houses"),
+  cdc0 %>%
+    count(Hall, FAKEHALL, House_Name, FAKEHOUS) %>%
+    count(Hall, FAKEHALL, name = "records"),
+  by = c("Hall", "FAKEHALL")) %>%
+  arrange(desc(records))
+```
+
+`FAKEHOUS` and `fakeroom` have some challenges. The larger halls (Witte, Sellery, Chadbourne, Ogg) have floor wing names (`House_Name`) that are alphabetically ordered by floor, and this ordering is preserved in `FAKEHOUS`. Some other halls have house names that are more scrambled. Knowing floor would be important if there was evidence of transmission floor to floor, but that seems less likely; we recommend re-randomizing house names. The `fakeroom` is monotome with the `Room`, which means to some degree room number could be reverse engineered if one knew the hall and house. On the other hand, knowing the geographic arrangement of rooms is important for modeling, so the distortion of `fakeroom` is problematic, and we propose merely removing the floor identifier (change 911 to 11 for instance) provides sufficient information for within floor modeling.
+
+```{r eval=FALSE}
+cdc0 %>%
+  filter(FAKEHOUS != 1000000) %>%
+  mutate(Room = floor(Room / 100)) %>%
+  rename(Floor = Room) %>%
+  distinct(Hall, House_Name, FAKEHOUS, Floor) %>%
+  arrange(Hall, House_Name, Floor)
+```
+
+### Examination of Columns
+
+The following columns seem to have PHI or PII:
+
+- PatientID
+- PatientNumber
+- Photo_ID
+- Campus_ID
+- Last_Name
+- First_Name
+- Date_of_Birth
+
+The following might be PHI or PII:
+
+- LabTestResultId
+- LabAccessionId
+- CollectionDate (part having exact time of day)
+- ContactNotes
+- PVI
+
+The following could identify specific housing information. These are partially obscured with FAKEHALL, FAKEHOUS and fakeroom. There are some problems with these for 
+
+- Residence_Hall
+- Hall
+- House_Name
+- Room
+
+### Randomization Suggestions
+
+Some time ago I studied random number generation, and I have some concerns about using an approach such as
+ 
+```
+NewID = FLOOR(RAND(PatientID) * 1000000)
+```
+
+There are two main problems:
+This can lead to two patients with the same NewID due to roundoff (from `floor()`).
+Resetting the seed by patient ID can result in NewIDs that are highly correlated with consecutive or closely numbered patient IDs
+Basically, `rand()` values can be arbitrarily close to each other, so multiplying by 1M is not adequate. With 20K cases (about what we have), I found several hundred duplicate NewIDs. For the second point, (pseudo-)random number generators are not designed to reset the seed in this way. In particular, linear congruential PRNGs can show banded patterns of similar values when seeds are near each other.
+ 
+Here is another way that seems to work and address both of these problems. Code is from R, but should be easily translated:
+
+```
+IDs <- unique(PatientID)
+set.seed(1)
+Rand <- order(runif(length(IDs)))
+NewID <- Rand[match(PatientID, IDs)]
+```
+
+That is, generate n (= number of unique patients) random numbers and replace those with their order, so now you have the numbers 1,2,…,n in random order. Then replace the ith PatientID with the order number of the ith random number.
+
+A similar calculation could be used to re-randomize the house within hall. The room number can be anonymized to floor by `floor(Room / 100)`.
+
+### Pattern of Missing Data
+
+There are missing data for some columns. All columns are listed below wtih the number of non-blank entries.
+
+```{r}
+sapply(cdc0, function(x) sum(!is.na(x) & x != ""))
+```
+### Rerandomize data
+
+Select desired columns. Create `RANDHALL` by collapsing across smaller halls.
+
+```{r}
+cdc0 <- cdc0 %>%
+  select(PatientID, Group,
+         ResultDate, CollectionDate, ConfirmedDate, TracedDate,
+         QuarantineStatus, HasSymptoms, NumberOfContacts,
+         Residence_Hall, Hall, House_Name, Room,
+         fakeroom, FAKEHALL, FAKEHOUS,
+         Positive) %>%
+  filter(!is.na(PatientID)) %>%
+  mutate(House_Name = ifelse(Hall %in% c("Barnard","Davis","Merit"), Hall, House_Name),
+         RANDHALL = ifelse(Hall %in% c("Barnard","Davis","Merit"), 0, FAKEHALL),
+         RANDHALL = ifelse(is.na(RANDHALL), -1, RANDHALL),
+         Campus = ifelse(Residence_Hall == "off campus", "off", "on")) %>%
+  select(-Residence_Hall)
+```
+
+```{r}
+# Collapse RANDHALL across smaller Halls 
+Min_Pos <- 15
+SmallHall <- (cdc0 %>%
+  filter(Positive == 1) %>%
+  count(RANDHALL) %>%
+  filter(n < Min_Pos))$RANDHALL
+CleanHouse <- (cdc0 %>%
+  filter(Positive == 1,
+         RANDHALL %in% SmallHall) %>%
+  count(RANDHALL, FAKEHOUS))$FAKEHOUS
+cdc0 <- cdc0 %>%
+  mutate(RANDHALL = ifelse(RANDHALL %in% SmallHall, 0, RANDHALL)) %>%
+  filter((RANDHALL != 0) | (RANDHALL == 0 & FAKEHOUS %in% CleanHouse))
+```
+
+Re-randomize house as `RANDOUS` using `FAKEHOUS` and floor.
+
+```{r}
+# Re-randomize House as RANDHOUS within RANDHALL
+Rehouse <- cdc0 %>%
+  # Break up houses with multiple floors
+  mutate(Floor = floor(Room / 100)) %>%
+  distinct(Hall, RANDHALL, House_Name, FAKEHOUS, Floor) %>%
+  group_by(RANDHALL) %>%
+  mutate(Hall = Hall,
+         FAKEHOUS = FAKEHOUS,
+         Floor = Floor,
+         RANDHOUS = order(runif(n()))) %>%
+  ungroup
+cdc0 <- 
+  left_join(
+    cdc0 %>% mutate(Floor = floor(Room / 100)),
+    Rehouse,
+    by = c("Hall", "RANDHALL", "House_Name", "FAKEHOUS", "Floor"))
+```
+
+```{r eval=FALSE}
+Rehouse %>%
+  group_by(Hall, RANDHALL) %>%
+  summarize(fakes = paste(sort(RANDHOUS), collapse = ",")) %>%
+  arrange(RANDHALL)
+```
+
+Table with range of rooms and floors by hall.
+
+```{r}
+cdc0 %>%
+  group_by(RANDHALL) %>%
+  summarize(Room_range = paste(range(Room %% 100), collapse = "-"),
+            Floor_range = paste(range(Floor), collapse = "-"),
+            Houses = length(unique(FAKEHOUS)),
+            RHouses = length(unique(RANDHOUS)),
+            Floors = length(unique(Floor))) %>%
+  ungroup %>%
+  kprint()
+```
+Write out code book for `RANDHALL`, `RANDHOUS` and `RANDID`.
+
+```{r}
+write.csv(cdc0 %>%
+  distinct(Hall, FAKEHALL, RANDHALL, House_Name, FAKEHOUS, RANDHOUS, Floor) %>%
+  select(Hall, FAKEHALL, RANDHALL, House_Name, FAKEHOUS, RANDHOUS, Floor) %>%
+  arrange(Hall, House_Name, Floor),
+  "data/uhs_codebook.csv", row.names = FALSE)
+```
+
+```{r}
+# Randomize PatientID as RANDID.
+# Cannot simply do floor(rand * 1000000) as they may not all be unique.
+IDs <- (cdc0 %>% distinct(PatientID) %>% arrange(PatientID))$PatientID
+set.seed(1)
+Rand <- order(runif(length(IDs)))
+cdc0 <- cdc0 %>%
+  mutate(RANDID = Rand[match(PatientID, IDs)])
+
+write.csv(data.frame(PatientID = IDs, RANDID = Rand), "data/uhs_codeID.csv",
+          row.names = FALSE)
+```
+
+Write out de-identified data.
+
+```{r}
+cdc <- cdc0 %>%
+  pivot_longer(ResultDate:TracedDate, names_to = "Event", values_to = "Date") %>%
+  distinct(RANDID, Date, Event, .keep_all = TRUE) %>%
+  mutate(RANDROOM = Room %% 100) %>%
+  select(RANDID, Group, Campus, Date, Event,
+         Positive,
+         QuarantineStatus, HasSymptoms, NumberOfContacts,
+         RANDHALL, RANDHOUS, RANDROOM) %>%
+  mutate(Event = 
+           factor(Event,
+                  c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
+         # Remove time of day from Date
+         Date = as.Date(Date, "%m/%d/%Y")) %>%
+  # For now, remove data with weird dates
+  filter(Date > as.Date("2020-01-01"))
+```
+
+```{r}
+# Note: data contains some off campus, some faculty.
+write.csv(cdc, "data/uhs_rand.csv", row.names = FALSE)
+```
+
+```{r}
+knitr::knit_exit()
+```
+
+### Various plots
+
+```{r}
+ggplot(cdc0 %>% filter(FAKEHALL == 16)) +
+  aes(Room, fakeroom) +
+  geom_point()
+```
+
+```{r}
+ggplot(data.frame(x=IDs,y=NEWID)) +
+  aes(x,y) +
+  geom_point() +
+  geom_smooth()
+```
+
+```{r}
+cdc0 %>%
+  count(Hall, FAKEHALL) %>%
+  arrange(desc(n))
+```
+
+```{r}
+cdc0 %>%
+  filter(Hall == "Sellery") %>%
+  count(House_Name, FAKEHOUS) %>%
+  arrange(FAKEHOUS)
+```
+
+```{r}
+ggplot(cdc %>% distinct())
+```
+
+```{r}
+save(cdc0, file = "data/PnCdump.rda")
+```
+
+
