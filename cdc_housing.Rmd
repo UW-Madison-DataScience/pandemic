@@ -46,8 +46,8 @@ countroom <- function(room) {
                    names_to = "roommate", values_to = "score") %>%
       ungroup %>%
       group_by(Date) %>%
-      summarize(score = sum(score, na.rm = TRUE)) %>%
-      ungroup
+      summarize(score = sum(score, na.rm = TRUE),
+                .groups = "drop")
   }
   out
 }
@@ -58,8 +58,8 @@ oneroom <- cdc_date %>%
   filter(Event == "CollectionDate") %>%
   group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
   summarize(Date = ifelse(max(Positive) == 1, min(Date[Positive == 1]), max(Date)),
-            Positive = max(Positive)) %>%
-  ungroup %>%
+            Positive = max(Positive),
+            .groups = "drop") %>%
   group_by(RANDHALL, RANDHOUS, RANDROOM) %>%
   arrange(Date) %>%
   mutate(Positive = cumsum(Positive),
@@ -73,8 +73,8 @@ one <- oneroom %>%
   group_by(RANDHALL, RANDHOUS, Positive) %>%
   summarize(center = median(Date),
             spread = IQR(Date),
-            HouseSize = n()) %>%
-  ungroup
+            HouseSize = n(),
+            .groups = "drop")
 ```
 
 Number of rooms with 0, 1 or 2 students positive:
@@ -82,8 +82,7 @@ Number of rooms with 0, 1 or 2 students positive:
 ```{r}
 one %>%
   group_by(RANDHALL, Positive) %>%
-  summarize(HouseSize = sum(HouseSize)) %>%
-  ungroup %>%
+  summarize(HouseSize = sum(HouseSize), .groups = "drop") %>%
   mutate(Positive = paste0("Pos", Positive)) %>%
   pivot_wider(names_from = "Positive", values_from = "HouseSize", values_fill = 0) %>%
   mutate(Rooms = Pos0 + Pos1 + Pos2,
@@ -150,8 +149,8 @@ house <- cdc_date %>%
   arrange(Date) %>%
   summarize(PrevDate = nth(Date, -2),
             Date = last(Date),
-            Positive = last(Positive)) %>%
-  ungroup
+            Positive = last(Positive),
+            .groups = "drop")
 roomsize <- house %>%
   count(RANDHALL, RANDHOUS, RANDROOM)
 # Restrict to rooms with exactly two students (avoiding turnover for now)
@@ -172,8 +171,8 @@ one_date <- house %>%
   arrange(Date) %>%
   summarize(Delay = max(Date) - min(Date),
          Positive = sum(Positive),
-         Date = first(Date)) %>%
-  ungroup %>%
+         Date = first(Date),
+         .groups = "drop") %>%
   filter(Positive == 2) %>%
   # Kludge used once only
   group_by(RANDHALL) %>%
@@ -202,8 +201,8 @@ pair_house <- function(house, neg = FALSE) {
     group_by(RANDROOM) %>%
     arrange(Date) %>%
     summarize(RoomPos = sum(Positive),
-              RoomID = RANDROOM[1]) %>%
-    ungroup %>%
+              RoomID = RANDROOM[1],
+              .groups = "drop") %>%
     mutate(RoomID = 1 + RoomID - min(RoomID))
   out <- 
     left_join(
@@ -376,13 +375,11 @@ bead_house <- function(house) {
   dates <- bind_rows(
     map(dates, house_infected), .id = "RANDHOUS") %>%
     group_by(RANDHALL, RANDHOUS, Date, students) %>%
-    summarize(Infected = sum(Infected)) %>%
-    ungroup %>%
+    summarize(Infected = sum(Infected), .groups = "drop") %>%
     filter(!is.na(Date))
   dates_total <- dates %>%
     group_by(RANDHOUS) %>%
-    summarize(CumInf = sum(Infected)) %>%
-    ungroup
+    summarize(CumInf = sum(Infected), .groups = "drop")
   left_join(
     dates,
     dates_total,
@@ -443,12 +440,7 @@ pair_hall <- function(object) {
   filter(Prev == "Date") %>%
   mutate(Week = (epiweek(Date))) %>%
   group_by(house, Week) %>%
-  summarize(count = sum(Positive)) %>%
-#  ungroup %>%
-#  arrange(Date) %>%
-#  group_by(house) %>%
-#  mutate(count = cumsum(count)) %>%
-  ungroup
+  summarize(count = sum(Positive), .groups = "drop")
 }
 ```
 
@@ -526,8 +518,8 @@ diff_hall <- function(object) {
   group_by(house, room, pos) %>%
   summarize(days_iqr = IQR(days),
             days = median(days),
-            size = n()) %>%
-  ungroup
+            size = n(),
+            .groups = "drop")
 }
 ```
 
@@ -565,23 +557,23 @@ cdcID <- cdc_date %>%
   filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(both$RANDROOM, both$RANDHALL, both$RANDHOUS)) %>%
   group_by(RANDHALL, RANDHOUS, RANDID) %>%
   summarize(Date = min(Date),
-            RANDROOM = RANDROOM[1]) %>%
-  ungroup %>%
+            RANDROOM = RANDROOM[1],
+            .groups = "drop") %>%
   group_by(RANDHALL) %>%
   mutate(ID = 0.25 + rank(10000 * RANDHOUS + RANDROOM, ties.method = "random") / 2,
-         roomID = rank(10000 * RANDHOUS + RANDROOM)) %>%
-  ungroup %>%
+         roomID = rank(10000 * RANDHOUS + RANDROOM),
+         .groups = "drop") %>%
   select(RANDHALL, RANDID, ID, roomID)
 cdcIDh <- cdc_date %>% 
   filter(paste(RANDROOM, RANDHALL, RANDHOUS) %in% paste(half$RANDROOM, half$RANDHALL, half$RANDHOUS)) %>%
   group_by(RANDHALL, RANDHOUS, RANDID) %>%
   summarize(Date = min(Date),
-            RANDROOM = RANDROOM[1]) %>%
-  ungroup %>%
+            RANDROOM = RANDROOM[1],
+            .groups = "drop") %>%
   group_by(RANDHALL) %>%
   mutate(ID = 0.25 +rank(10000 * RANDHOUS + RANDROOM, ties.method = "random") / 2,
-         roomID = rank(10000 * RANDHOUS + RANDROOM)) %>%
-  ungroup %>%
+         roomID = rank(10000 * RANDHOUS + RANDROOM),
+         .groups = "drop") %>%
   select(RANDHALL, RANDID, ID, roomID)
 ```
 
@@ -625,8 +617,8 @@ half_date <- left_join(
     cdcIDh,
     by = c("RANDHALL", "RANDID")) %>%
   group_by(RANDID) %>%
-  mutate(Positive = c("Negative","Positive")[1 + max(Positive)]) %>%
-  ungroup
+  mutate(Positive = c("Negative","Positive")[1 + max(Positive)],
+         .groups = "drop")
 ```
 
 
@@ -696,8 +688,8 @@ house <- cdc_date %>%
   arrange(Date) %>%
   summarize(PrevDate = nth(Date, -2),
             Date = last(Date),
-            Positive = last(Positive)) %>%
-  ungroup
+            Positive = last(Positive),
+            .groups = "drop")
 roomsize <- house %>%
   count(RANDHALL, RANDHOUS, RANDROOM)
 # Restrict to rooms with exactly two students (avoiding turnover for now)
@@ -706,8 +698,7 @@ house <-
   filter(n == 2) %>%
   select(-n) %>%
   group_by(RANDHALL, RANDHOUS) %>%
-  mutate(students = n()) %>%
-  ungroup %>%
+  mutate(students = n(), .groups = "drop") %>%
   mutate(house = RANDHOUS,
          RANDHOUS = paste0(RANDHOUS, " (", students, ")"))
 ```
@@ -718,8 +709,8 @@ one_date <- house %>%
   arrange(Date) %>%
   summarize(Delay = max(Date) - min(Date),
          Positive = sum(Positive),
-         Date = first(Date)) %>%
-  ungroup %>%
+         Date = first(Date),
+         .groups = "drop") %>%
   filter(Positive == 2) %>%
   # Kludge used once only
   group_by(RANDHALL) %>%
@@ -769,8 +760,7 @@ ggplot(off %>% filter(Event == "CollectionDate")) +
 ggplot(off %>%
          filter(Event == "CollectionDate", Positive == 1) %>%
          group_by(Date) %>%
-         summarize(Positive = sum(Positive)) %>%
-         ungroup %>%
+         summarize(Positive = sum(Positive), .groups = "drop") %>%
          arrange(Date) %>%
          mutate(Positive = cumsum(Positive))) +
   aes(Date, Positive) +
