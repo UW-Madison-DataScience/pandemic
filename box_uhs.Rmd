@@ -1,8 +1,8 @@
 ---
 title: "BOX UHS Download"
 output:
-  html_document: default
   word_document: default
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -67,7 +67,8 @@ cdc0 <- read.csv("data/matchforCDC-PHI.csv")
 The following columns would be useful to share with campus modelers. They appear to contain no PHI or PII but have sufficient data for modelers to study patterns of infection. Please note that this is based on data through 5 October 2020. See details below for study of fields
 
 - RANDID (carefully randomized from PatientID)
-- Group (identifies faculty)
+- Group (`sors` identifies faculty)
+- Campus (on or off campus)
 - ResultDate, CollectionDate, ConfirmedDate, TracedDate (dropping time of day)
 - QuarantineStatus, HasSymptoms, NumberOfContacts
 - RANDHALL (FAKEHALL adding in 3 small halls and moving all small halls to 0)
@@ -175,6 +176,10 @@ sapply(cdc0, function(x) sum(!is.na(x) & x != ""))
 Select desired columns. Create `RANDHALL` by collapsing across smaller halls.
 
 ```{r}
+if(is.na(match("Group", names(cdc0))) | !is.na(match("sors", names(cdc0)))) {
+  cdc0 <- cdc0 %>%
+    rename(Group = "sors")
+}
 cdc0 <- cdc0 %>%
   select(PatientID, Group,
          ResultDate, CollectionDate, ConfirmedDate, TracedDate,
@@ -294,6 +299,8 @@ cdc <- cdc0 %>%
 # Note: data contains some off campus, some faculty.
 write.csv(cdc, "data/uhs_rand.csv", row.names = FALSE)
 ```
+
+This document summarizes housing information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/box_uhs.Rmd).
 
 ```{r}
 knitr::knit_exit()

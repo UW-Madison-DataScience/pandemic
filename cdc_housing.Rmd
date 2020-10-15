@@ -265,29 +265,38 @@ ggplot(pair_house(house %>%
 ```
 
 ```{r}
-plot_hall <- function(house, hallID, neg = FALSE) {
-object <- house %>% filter(RANDHALL == hallID)
-out <- bind_rows(
-    map(split(object, object$RANDHOUS), pair_house, neg),
-    .id = "house") %>%
-  mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1", as.character(RoomPos)), c("2","1","0.1","0")))
-if(neg) {
-  gtitle <- "All Students by Room Burden across House Rooms in Hall"
-} else {
-  gtitle <- "Positive Students by Room Burden across House Rooms in Hall"
-}
-ggplot(out) +
-  aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
-  geom_vline(xintercept = as.Date(c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
-             linetype = "dashed", col = "black") +
-  geom_line() +
-  geom_point() +
-  facet_wrap(~ house) +
-  scale_shape_manual(values = c(21,19)) +
-  scale_color_manual(values = c("blue","red","darkgrey","lightgrey")) +
-  theme(#legend.position = "none", 
-    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
-  ggtitle(paste(gtitle, hallID))
+plot_hall <- function(house, hallID, neg = FALSE, freey = FALSE) {
+  object <- house %>% filter(RANDHALL == hallID)
+  out <- 
+    bind_rows(
+      map(split(object, object$RANDHOUS), pair_house, neg),
+      .id = "house") %>%
+    mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0,
+                                   "0.1", as.character(RoomPos)), c("2","1","0.1","0")))
+  if(neg) {
+    gtitle <- "All Students by Room Burden across House Rooms in Hall"
+  } else {
+    gtitle <- "Positive Students by Room Burden across House Rooms in Hall"
+  }
+  p <- ggplot(out) +
+    aes(Date, RoomID, col = RoomPos, group = RoomID, shape = TestResult) +
+    geom_vline(
+      xintercept = as.Date(
+        c("2020-08-25","2020-09-01","2020-09-04","2020-09-09","2020-09-17")),
+      linetype = "dashed", col = "black") +
+    geom_line() +
+    geom_point() 
+  if(freey) {
+    p <- p + facet_wrap(~ house, scales = "free_y")
+  } else {
+    p <- p + facet_wrap(~ house)
+  } 
+  p +
+    scale_shape_manual(values = c(21,19)) +
+    scale_color_manual(values = c("blue","red","darkgrey","lightgrey")) +
+    theme(#legend.position = "none", 
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    ggtitle(paste(gtitle, hallID))
 }
 ```
 
@@ -324,7 +333,7 @@ plot_hall(house, 13, TRUE)
 ```
 
 ```{r fig.width = 7, fig.height = 9}
-plot_hall(house, 0, TRUE)
+plot_hall(house, 0, TRUE, freey = TRUE)
 ```
 
 ```{r}
