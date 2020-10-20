@@ -58,6 +58,11 @@ filename <- scan("data/housing_data_url.txt", "text")
 cdc0 <- box_read(filename)
 ```
 
+```{r eval=FALSE}
+filename <- scan("data/housing_data_url.txt", "text")
+cdc0 <- read.csv(filename, row.names = NULL)
+```
+
 ```{r}
 cdc0 <- read.csv("data/matchforCDC-PHI.csv")
 ```
@@ -166,7 +171,7 @@ A similar calculation could be used to re-randomize the house within hall. The r
 
 ### Pattern of Missing Data
 
-There are missing data for some columns. All columns are listed below wtih the number of non-blank entries.
+There are missing data for some columns. All columns are listed below with the number of non-blank entries.
 
 ```{r}
 sapply(cdc0, function(x) sum(!is.na(x) & x != ""))
@@ -278,21 +283,32 @@ write.csv(data.frame(PatientID = IDs, RANDID = Rand), "data/uhs_codeID.csv",
 Write out de-identified data.
 
 ```{r}
+# Pivot longer; create RANDROOM, filter out missing Date.
 cdc <- cdc0 %>%
   pivot_longer(ResultDate:TracedDate, names_to = "Event", values_to = "Date") %>%
+  mutate(RANDROOM = Room %% 100,
+         Event = factor(Event, c("CollectionDate", "ResultDate",
+                                 "ConfirmedDate", "TracedDate")),
+         # Remove time of day from Date
+         Date = as.Date(Date, "%m/%d/%Y")) %>%
+  # For now, remove data with weird dates
+  filter(!is.na(Positive),
+         !is.na(Date),
+         Date > as.Date("2020-01-01")) %>%
+  # Filter out Confirmed or Traced Date that have Positive = 0
+  filter(!(Event %in% c("ConfirmedDate", "TracedDate")) | Positive == 1)
+```
+
+```{r}
+# This step is tricky.
+# ConfirmedDate and TracedDate are repeated sometimes with old CollectionDate.
+cdc <- cdc %>%
   distinct(RANDID, Date, Event, .keep_all = TRUE) %>%
-  mutate(RANDROOM = Room %% 100) %>%
   select(RANDID, Group, Campus, Date, Event,
          Positive,
          QuarantineStatus, HasSymptoms, NumberOfContacts,
          RANDHALL, RANDHOUS, RANDROOM) %>%
-  mutate(Event = 
-           factor(Event,
-                  c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
-         # Remove time of day from Date
-         Date = as.Date(Date, "%m/%d/%Y")) %>%
-  # For now, remove data with weird dates
-  filter(Date > as.Date("2020-01-01"))
+  arrange(RANDHALL, RANDHOUS, RANDROOM, Date)
 ```
 
 ```{r}

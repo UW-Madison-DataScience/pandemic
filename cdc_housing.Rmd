@@ -91,7 +91,9 @@ one %>%
   kprint()
 ```
 `RANDHALL` 0 is aggregation of halls with fewer than 15 students reporting. Next plot summarizes by House (point) within Hall (facet) differences within rooms of last collection date; center = median, spread = IQR.
-Subsequent plots show individual students per horizontal line (sometimes with a little jitter) organized by room. Coloring highlights time course of dates, positive vs negative, or room. Only considering rooms with exactly two roommates, as other sizes might be due to room transfers.
+Subsequent plots show individual students per horizontal line (sometimes with a little jitter) organized by room. Coloring highlights time course of dates, positive vs negative, or room. 
+
+Only considering rooms with exactly two roommates, as other sizes might be due to room transfers. Further, students with positive tests are removed to isolation and not considered further. This ignores students who moved to other rooms, and ignores testing after students are moved into isolation (there are data on when students finally turn negative and are removed from isolation).
 
 \newpage
 
@@ -766,6 +768,49 @@ ggplot(off %>%
   aes(Date, Positive) +
   geom_line() +
   scale_y_log10()
+```
+
+### Look at Confirmed Positives and isolation
+
+There is a problem with my approach in that students are moved into isolation if positive, but then continue to be tested, so last test will likely by negative if during isolation.
+Also, Positive appears for Collection and Result Date, but not necessarily carried over for Confirmed and Traced Date.
+
+```{r}
+isol <- cdc_date %>% filter(QuarantineStatus == "Isolation",
+                            Group == "Student",
+                            Campus == "on")
+```
+
+```{r}
+isol %>%
+  filter(Event == "CollectionDate") %>%
+  arrange(Date) %>%
+  group_by(RANDID) %>%
+  summarize(Date = last(Date),
+            MaxPos = max(Positive),
+            Positive = last(Positive),
+            .groups = "drop") %>%
+  ungroup %>%
+  filter(Positive == 0, MaxPos == 1)
+```
+```{r}
+cdc_date %>% filter(RANDID == 1250) %>%
+  arrange(Date)
+```
+
+```{r}
+ggplot(isol %>% filter(Event == "CollectionDate")) +
+  aes(Date, Positive, col = HasSymptoms) +
+  geom_jitter(width = 0, height = 0.125, alpha = 0.25) +
+  facet_wrap(~ HasSymptoms)
+```
+
+
+```{r}
+confdates <- (isol %>% filter(Event == "ConfirmedDate"))
+isol_conf <- isol %>%
+  filter(Event %in% c("CollectionDate","ConfirmedDate")) %>%
+  pivot_wider(names_from = "Event", values_from = "Date")
 ```
 
 ```{r}

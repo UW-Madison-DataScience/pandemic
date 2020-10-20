@@ -1,7 +1,9 @@
 ---
 title: "DRAFT Quarantine Summary"
 author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
-output: word_document
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
@@ -13,6 +15,55 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
 library(tidyverse)
 library(readxl)
 ```
+
+## Quarantine Summary
+
+These data come from housing summaries curated by Todd Shechter
+
+```{r}
+quar <-
+  bind_rows(
+isolation = 
+  bind_rows(
+    read_excel(("data/IQ Occ 10.16.20.xlsx"), sheet = "Sept",
+               skip = 1, n_max = 9, .name_repair = "minimal") %>%
+    select(1:33) %>%
+    pivot_longer(-(1:2), names_to = "Date", values_to = "Count"),
+    read_excel(("data/IQ Occ 10.16.20.xlsx"), sheet = "Oct",
+               skip = 1, n_max = 9, .name_repair = "minimal") %>%
+    select(1:32) %>%
+    pivot_longer(-(1:2), names_to = "Date", values_to = "Count")) %>%
+    rename(Location = "Isolation",
+           Capacity = "Beds"),
+quarantine = 
+  bind_rows(
+    read_excel(("data/IQ Occ 10.16.20.xlsx"), sheet = "Sept",
+                   skip = 11, n_max = 7, .name_repair = "minimal") %>%
+    select(1:33) %>%
+    pivot_longer(-(1:2), names_to = "Date", values_to = "Count"),
+    read_excel(("data/IQ Occ 10.16.20.xlsx"), sheet = "Oct",
+                   skip = 11, n_max = 12, .name_repair = "minimal") %>%
+    select(1:32) %>%
+    pivot_longer(-(1:2), names_to = "Date", values_to = "Count")) %>%
+    rename(Location = "Quarantine",
+           Capacity = "Rooms"),
+ .id = "stay") %>%
+  mutate(Date = as.Date("2020-08-31") - 44074 + as.integer(Date)) %>%
+  filter(!is.na(Count)) %>% 
+  mutate(Summary = c("By Location","Total")[1 + (Location == "Total")])
+```
+
+```{r fig.height = 7}
+ggplot(quar) +
+  aes(Date, Count, col = Location) +
+  facet_wrap(stay ~ Summary, scales = "free_y") +
+  geom_line() +
+  theme(legend.position = "none")
+```
+
+## Quarantine Detail
+
+This part concerns data from Collin Pitts in his multi-sheet spreadsheet
 
 ```{r}
 quar_sheets <- as.list(excel_sheets("data/De-identified Roster.xlsx"))
