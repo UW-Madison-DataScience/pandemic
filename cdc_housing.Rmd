@@ -27,7 +27,8 @@ kprint <- function(x) {
 filename <- "data/uhs_rand.csv"
 cdc_date <- read.csv(filename) %>%
   mutate(Event = factor(Event,
-                        c("CollectionDate", "ResultDate", "ConfirmedDate", "TracedDate")),
+                        c("CollectionDate", "ResultDate",
+                          "ConfirmedDate", "TracedDate")),
          Date = as.Date(Date)) %>%
   filter(RANDHALL != -1,
          Campus == "on")
@@ -149,17 +150,21 @@ house <- cdc_date %>%
          !is.na(Positive)) %>%
   group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
   arrange(Date) %>%
-  summarize(PrevDate = nth(Date, -2),
-            Date = last(Date),
-            Positive = last(Positive),
-            .groups = "drop")
+  # Cannot just take last entry, as may have come out of isolation if Positive earlier.
+  summarize(FirstPos = which.max(diff(c(0, Positive))),
+            FirstPos = ifelse(FirstPos == 1 & Positive[1] == 0, n(), FirstPos),
+            PrevDate = nth(Date, FirstPos - 1),
+            Date = nth(Date, FirstPos),
+            Positive = nth(Positive, FirstPos),
+            .groups = "drop") %>%
+  select(-FirstPos)
 roomsize <- house %>%
   count(RANDHALL, RANDHOUS, RANDROOM)
 # Restrict to rooms with exactly two students (avoiding turnover for now)
 house <-
   left_join(house, roomsize, by = c("RANDHALL", "RANDHOUS", "RANDROOM")) %>%
-  filter(n == 2) %>%
-  select(-n) %>%
+#  filter(n == 2) %>%
+#  select(-n) %>%
   group_by(RANDHALL, RANDHOUS) %>%
   mutate(students = n()) %>%
   ungroup %>%
@@ -211,13 +216,13 @@ pair_house <- function(house, neg = FALSE) {
       pos_pair,
       pos_room,
       by = "RANDROOM") %>%
-    mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0, "0.1",
-                                   as.character(RoomPos)), c("2","1","0.1","0")))
+    mutate(RoomPos = factor(ifelse(RoomPos > 0 & Positive == 0, "0.1",
+                                   as.character(pmin(2, RoomPos))), c("2","1","0.1","0")))
   if(nrow(out)) {
     out %>%
     # jitter roommates if 2 entries per room
     group_by(RANDROOM) %>%
-    mutate(RoomID = ifelse(!neg & RoomPos == 1, RoomID, RoomID + c(-0.2,0.2))) %>%
+    mutate(RoomID = RoomID + seq(-0.2, 0.2, length = n())) %>%
     ungroup %>%
     pivot_longer(PrevDate:Date, names_to = "Prev", values_to = "Date") %>%
     group_by(RoomID) %>%
@@ -273,7 +278,8 @@ plot_hall <- function(house, hallID, neg = FALSE, freey = FALSE) {
       map(split(object, object$RANDHOUS), pair_house, neg),
       .id = "house") %>%
     mutate(RoomPos = factor(ifelse(RoomPos == 1 & Positive == 0,
-                                   "0.1", as.character(RoomPos)), c("2","1","0.1","0")))
+                                   "0.1", 
+                                   as.character(RoomPos)), c("2","1","0.1","0")))
   if(neg) {
     gtitle <- "All Students by Room Burden across House Rooms in Hall"
   } else {
@@ -433,6 +439,9 @@ ggplot(dates) +
   ggtitle("Inferred Positives by House and RANDHALL")
 ```
 
+```{r}
+knitr::knit_exit()
+```
 
 ```{r}
 pair_hall <- function(object) {
@@ -713,11 +722,7 @@ one_date <- house %>%
          Positive = sum(Positive),
          Date = first(Date),
          .groups = "drop") %>%
-  filter(Positive == 2) %>%
-  # Kludge used once only
-  group_by(RANDHALL) %>%
-  mutate(roomID = factor(rank(10000 * house + RANDROOM))) %>%
-  ungroup
+  filter(Positive == 2)
 ```
 
 ```{r}

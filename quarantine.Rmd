@@ -14,6 +14,13 @@ knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
 ```{r}
 library(tidyverse)
 library(readxl)
+kprint <- function(x) {
+  if(interactive()) {
+    print(x)
+  } else {
+    knitr::kable(x)
+  }
+}
 ```
 
 ## Quarantine Summary
@@ -60,6 +67,198 @@ ggplot(quar) +
   geom_line() +
   theme(legend.position = "none")
 ```
+
+## Quarantine from UHS Data
+
+
+```{r}
+filename <- "data/uhs_rand.csv"
+cdc_date <- read.csv(filename) %>%
+  mutate(Event = factor(Event,
+                        c("CollectionDate", "ResultDate",
+                          "ConfirmedDate", "TracedDate")),
+         Date = as.Date(Date),
+         QuarantineStatus = ifelse(QuarantineStatus == "", "Negative", QuarantineStatus)) %>%
+  filter(!is.na(Date),
+         !is.na(Positive))
+```
+
+```{r}
+# who moved off campus
+off <- (
+  cdc_date %>%
+    filter(RANDHALL == -1 | Campus == "off") %>%
+    distinct(RANDHALL, RANDHOUS, RANDROOM, RANDID))$RANDID
+```
+
+
+```{r}
+cdc_date <- cdc_date %>%
+  filter(RANDHALL != -1,
+         Campus == "on")
+```
+
+```{r}
+# Any off-campus were on-campus?
+sum(cdc_date$RANDID %in% off)
+```
+
+```{r}
+# Who moved to another on-campus spot?
+moved <- (cdc_date %>%
+  distinct(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
+  count(RANDID) %>%
+  filter(n > 1))$RANDID
+(tmp <- cdc_date %>%
+  filter(RANDID %in% moved) %>%
+  arrange(Date) %>%
+  group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
+  summarize(FirstDate = first(Date),
+            LastDate = last(Date),
+            Positive = max(Positive),
+            .groups = "drop") %>%
+  arrange(RANDID, FirstDate))
+```
+
+Number of people per room
+
+```{r}
+cdc_date %>%
+  distinct(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
+  count(RANDHALL, RANDHOUS, RANDROOM) %>%
+  count(n)
+```
+
+```{r}
+# Rooms that seem to be triples
+cdc_date %>%
+  distinct(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
+  count(RANDHALL, RANDHOUS, RANDROOM) %>%
+  filter(n == 3) %>%
+  group_by(RANDHALL, RANDROOM) %>%
+  summarize(RANDHOUS = paste(RANDHOUS, collapse = ","), .groups = "drop")
+```
+
+```{r}
+# Triples that seem unfilled
+cdc_date %>%
+  distinct(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
+  count(RANDHALL, RANDHOUS, RANDROOM) %>%
+  filter((RANDHALL == 5 & RANDROOM == c(5, 61)) |
+           (RANDHALL == 16 & RANDROOM %in% c(28, 78)),
+         n < 3)
+```
+
+```{r}
+# Trying to track who has left campus
+first_date <- cdc_date %>%
+  arrange(Date) %>%
+  group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
+  summarize(Date = first(Date),
+            Positive = max(Positive),
+            QuarantineStatus = first(QuarantineStatus),
+            .groups = "drop") %>%
+  mutate(RANDHALL = as.character(RANDHALL),
+         RANDCOL = ifelse(RANDHALL %in% c("10","16"), RANDHALL, "0"),
+         IQ = ifelse(QuarantineStatus == "Isolation" & Positive == 1,
+                     "Isolation Positive", QuarantineStatus),
+         IQ = ifelse(IQ %in% c("Quarantine", "Isolation"), paste(IQ, "Negative"), IQ))
+```
+
+```{r}
+ggplot(first_date) +
+  aes(Date, group = RANDHALL, col = RANDCOL) +
+  stat_ecdf(geom = "step") +
+  facet_wrap( ~ IQ) +
+  scale_color_manual(values = c("grey","red","blue")) +
+  theme(legend.position = "none")
+```
+
+```{r}
+# Trying to track who has left campus
+last_date <- cdc_date %>%
+  arrange(Date) %>%
+  group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
+  summarize(Date = last(Date),
+            Positive = max(Positive),
+            QuarantineStatus = last(QuarantineStatus),
+            .groups = "drop") %>%
+  mutate(RANDHALL = as.character(RANDHALL),
+         RANDCOL = ifelse(RANDHALL %in% c("10","16"), RANDHALL, "0"),
+         IQ = ifelse(QuarantineStatus == "Isolation" & Positive == 1,
+                     "Isolation Positive", QuarantineStatus),
+         IQ = ifelse(IQ %in% c("Quarantine", "Isolation"), paste(IQ, "Negative"), IQ),
+         IQ = factor(IQ, c("Isolation Positive","Negative","Isolation Negative", "Quarantine Negative")),
+         RANDCOL = factor(RANDCOL, c("0", "10","16"))) %>%
+  arrange(RANDCOL, Date)
+```
+
+Many of the students who went into isolation did not return to their residence hall, based on their last test date. Regardless of whether they arrived with a previous COVID positive or turned positive while in the residence hall, most of them had left by about 15 September. There was a marked early departure of negative cases from the two quarantined residence halls. For quarantined students, the patterns were similar across the residence halls.
+
+```{r fig.width = 5, fig.height = 5}
+ggplot(last_date) +
+  aes(Date, group = RANDHALL, col = RANDCOL) +
+  stat_ecdf(data = last_date %>% filter(RANDCOL == "0"), geom = "step", size = 1) +
+  stat_ecdf(data = last_date %>% filter(RANDCOL != "0"), geom = "step", size = 1) +
+  facet_wrap(~ IQ) +
+  scale_color_manual(values = c("grey","red","blue")) +
+  theme(legend.position = "none") +
+  ggtitle("Sellery and Witte vs other RH Last Testing (Departure?) Dates")
+```
+
+```{r}
+# Get one record per student
+do_date <- function(cond, val, Date) {
+  out <- Date[val]
+  if(cond) {
+    out <- as.Date(NA)
+  }
+  out
+}
+house <- cdc_date %>%
+  filter(Event == "CollectionDate") %>%
+  group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
+  # Want to find (if any)
+  # First Negative
+  # Previous Negative
+  # First Positive
+  # Last Positive
+  # Next Negative after Positive
+  # Last Negative
+  arrange(Date) %>%
+  # Cannot just take last entry, as may have come out of isolation if Positive earlier.
+  summarize(FirstPos = which.max(diff(c(0, Positive))),
+            FirstPos = ifelse(FirstPos == 1 & Positive[1] == 0, NA, FirstPos), # No positives.
+            FirstNeg = ifelse(is.na(FirstPos) | FirstPos > 1, 1, NA), # First negative. Or not.
+            LastPos  = ifelse(is.na(FirstPos), NA, which.min(diff(c(Positive, 0)))),
+            NextNeg  = ifelse(is.na(LastPos) | LastPos == n(), NA, LastPos + 1),
+            LastNeg  = ifelse(!is.na(LastPos) & LastPos == n(), NA, n()),
+            FirstNeg = do_date(is.na(FirstNeg), FirstNeg, Date),
+            PrevNeg  = do_date(is.na(FirstPos) | FirstPos == 1, FirstPos - 1, Date),
+            FirstPos = do_date(is.na(FirstPos), FirstPos, Date),
+            LastPos  = do_date(is.na(LastPos), LastPos, Date),
+            NextNeg  = do_date(is.na(NextNeg), NextNeg, Date),
+            LastNeg  = do_date(is.na(LastNeg), LastNeg, Date),
+            Positive = max(Positive),
+            .groups = "drop")
+```
+
+```{r}
+# Not sure I need this.
+roomsize <- house %>%
+  count(RANDHALL, RANDHOUS, RANDROOM)
+# Restrict to rooms with exactly two students (avoiding turnover for now)
+house <-
+  left_join(house, roomsize, by = c("RANDHALL", "RANDHOUS", "RANDROOM")) %>%
+  filter(n == 2) %>%
+  select(-n) %>%
+  group_by(RANDHALL, RANDHOUS) %>%
+  mutate(students = n()) %>%
+  ungroup %>%
+  mutate(house = RANDHOUS,
+         RANDHOUS = paste0(RANDHOUS, " (", students, ")"))
+```
+
 
 ## Quarantine Detail
 
