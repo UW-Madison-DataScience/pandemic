@@ -68,7 +68,7 @@ ggplot(quar) +
   theme(legend.position = "none")
 ```
 
-## Quarantine from UHS Data
+## Quarantine from UHS Randomized Data
 
 
 ```{r}
@@ -80,7 +80,8 @@ cdc_date <- read.csv(filename) %>%
          Date = as.Date(Date),
          QuarantineStatus = ifelse(QuarantineStatus == "", "Negative", QuarantineStatus)) %>%
   filter(!is.na(Date),
-         !is.na(Positive))
+         !is.na(Positive)) %>%
+  arrange(RANDID, Date)
 ```
 
 ```{r}
@@ -178,6 +179,7 @@ ggplot(first_date) +
 # Trying to track who has left campus
 last_date <- cdc_date %>%
   arrange(Date) %>%
+  filter(Event %in% c("CollectionDate", "ResultDate", "ConfirmedDate")) %>%
   group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
   summarize(Date = last(Date),
             Positive = max(Positive),
@@ -206,59 +208,117 @@ ggplot(last_date) +
   ggtitle("Sellery and Witte vs other RH Last Testing (Departure?) Dates")
 ```
 
+### Students who went into isolation
+
 ```{r}
-# Get one record per student
-do_date <- function(cond, val, Date) {
-  out <- Date[val]
-  if(cond) {
-    out <- as.Date(NA)
-  }
-  out
-}
-house <- cdc_date %>%
-  filter(Event == "CollectionDate") %>%
-  group_by(RANDHALL, RANDHOUS, RANDROOM, RANDID) %>%
-  # Want to find (if any)
-  # First Negative
-  # Previous Negative
-  # First Positive
-  # Last Positive
-  # Next Negative after Positive
-  # Last Negative
-  arrange(Date) %>%
-  # Cannot just take last entry, as may have come out of isolation if Positive earlier.
-  summarize(FirstPos = which.max(diff(c(0, Positive))),
-            FirstPos = ifelse(FirstPos == 1 & Positive[1] == 0, NA, FirstPos), # No positives.
-            FirstNeg = ifelse(is.na(FirstPos) | FirstPos > 1, 1, NA), # First negative. Or not.
-            LastPos  = ifelse(is.na(FirstPos), NA, which.min(diff(c(Positive, 0)))),
-            NextNeg  = ifelse(is.na(LastPos) | LastPos == n(), NA, LastPos + 1),
-            LastNeg  = ifelse(!is.na(LastPos) & LastPos == n(), NA, n()),
-            FirstNeg = do_date(is.na(FirstNeg), FirstNeg, Date),
-            PrevNeg  = do_date(is.na(FirstPos) | FirstPos == 1, FirstPos - 1, Date),
-            FirstPos = do_date(is.na(FirstPos), FirstPos, Date),
-            LastPos  = do_date(is.na(LastPos), LastPos, Date),
-            NextNeg  = do_date(is.na(NextNeg), NextNeg, Date),
-            LastNeg  = do_date(is.na(LastNeg), LastNeg, Date),
-            Positive = max(Positive),
-            .groups = "drop")
+# record by student
+record <- split(cdc_date, cdc_date$RANDID)
+record_pos <- record[names(record) %in% 
+                       (last_date %>%
+                          filter(QuarantineStatus == "Isolation",
+                                 Positive == 1))$RANDID]
+record_pos_neg <- 
+  map(
+    record_pos,
+    function(x) {
+      if(last(x$Positive == 0)) {
+        x
+      } else {
+        NULL
+      }})
+record_pos_neg <- 
+  bind_rows(
+    record_pos_neg[!sapply(record_pos_neg, is.null)],
+    .id = "RANDID")
+record_pos <- 
+  bind_rows(
+    record_pos[!(names(record_pos) %in% record_pos_neg$RANDID)],
+    .id = "RANDID")
+```
+
+Look at students who went into isolation, separated by whether their last test was negative or positive. Vertical lines at one and two weeks before last record date. Circles are collection dates; triangles are result dates. Red are negative; blue are positive.
+
+```{r}
+ggplot(record_pos_neg %>% 
+         filter(Event %in% c("CollectionDate", "ResultDate")) %>%
+         group_by(RANDID) %>%
+           mutate(lastDate = last(Date)) %>%
+         ungroup %>%
+         arrange(lastDate) %>%
+         mutate(ID = match(RANDID, unique(RANDID)))) +
+  aes(Date, ID, col = factor(Positive), group = ID, shape = Event) +
+  geom_vline(xintercept = max(last_date$Date) - c(7,14), linetype = "dashed", col = "darkgrey") +
+  geom_point(size = 2) +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("Students Returning from Isolation")
+```
+```{r}
+later <- (last_date %>%
+  filter(Date > as.Date("2020-09-20")))$RANDID
+```
+
+```{r fig.height = 7}
+ggplot(record_pos %>% 
+         filter(Event %in% c("CollectionDate", "ResultDate"),
+                !(RANDID %in% later)) %>%
+         group_by(RANDID) %>%
+           mutate(lastDate = last(Date)) %>%
+         ungroup %>%
+         arrange(lastDate) %>%
+         mutate(ID = match(RANDID, unique(RANDID)))) +
+  aes(Date, ID, col = factor(Positive), group = ID, shape = Event) +
+  geom_vline(xintercept = max(last_date$Date) - c(7,14), linetype = "dashed", col = "darkgrey") +
+  geom_point() +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("Students Whose Last Record was Positive and Before 20 Sep")
+```
+
+```{r fig.height = 10}
+ggplot(record_pos %>% 
+         filter(Event %in% c("CollectionDate", "ResultDate"),
+                RANDID %in% later) %>%
+         group_by(RANDID) %>%
+           mutate(lastDate = last(Date)) %>%
+         ungroup %>%
+         arrange(lastDate) %>%
+         mutate(ID = match(RANDID, unique(RANDID)))) +
+  aes(Date, ID, col = factor(Positive), group = ID, shape = Event) +
+  geom_vline(xintercept = max(last_date$Date) - c(7,14), linetype = "dashed", col = "darkgrey") +
+  geom_point() +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("Students Whose Last Record was Positive and After 20 Sep")
 ```
 
 ```{r}
-# Not sure I need this.
-roomsize <- house %>%
-  count(RANDHALL, RANDHOUS, RANDROOM)
-# Restrict to rooms with exactly two students (avoiding turnover for now)
-house <-
-  left_join(house, roomsize, by = c("RANDHALL", "RANDHOUS", "RANDROOM")) %>%
-  filter(n == 2) %>%
-  select(-n) %>%
-  group_by(RANDHALL, RANDHOUS) %>%
-  mutate(students = n()) %>%
-  ungroup %>%
-  mutate(house = RANDHOUS,
-         RANDHOUS = paste0(RANDHOUS, " (", students, ")"))
+# record by student
+record_neg <- record[names(record) %in% 
+                       (last_date %>%
+                          filter(QuarantineStatus == "Isolation",
+                                 Positive == 0))$RANDID]
+record_neg <- 
+  bind_rows(
+    record_neg,
+    .id = "RANDID")
 ```
 
+```{r fig.height = 7}
+ggplot(record_neg %>% 
+         filter(Event %in% c("CollectionDate", "ResultDate")) %>%
+         group_by(RANDID) %>%
+           mutate(lastDate = last(Date)) %>%
+         ungroup %>%
+         arrange(lastDate) %>%
+         mutate(ID = match(RANDID, unique(RANDID)))) +
+  aes(Date, ID, col = factor(Positive), group = ID, shape = Event) +
+  geom_vline(xintercept = max(last_date$Date) - c(7,14), linetype = "dashed", col = "darkgrey") +
+  geom_point() +
+  geom_line() +
+  theme(legend.position = "none") +
+  ggtitle("Students labeled Isolation with all Negatives")
+```
 
 ## Quarantine Detail
 
