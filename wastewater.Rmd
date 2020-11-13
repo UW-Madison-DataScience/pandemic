@@ -1,0 +1,284 @@
+---
+title: "Wastewater"
+author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4)
+```
+
+```
+JEFF STEELE <jeff.steele@wisc.edu>
+Dagmara S Antkiewicz <dagmara.antkiewicz@slh.wisc.edu>
+MARTIN M SHAFER <mmshafer@wisc.edu>
+Kayley Janssen <Kayley.Janssen@slh.wisc.edu>
+Subject: SARS-CoV-2 Data send on behalf of Dagmara Antkiewicz
+```
+
+We are retrieving different pieces of information from different sources and many points are still missing (as you will see). For example `TSS` for Madison (MMSD) influents comes from MMSD’s facility (via email), while `TSS` for UW samples are done at the State Lab (and analysis time is about 1-2 weeks at times). Some data/measures we only started gathering more recently, so not all dates will have these (and we are working hard on doing back-entry of data and new analysis and review at the same time).
+
+Virus concentration and recovery methods are far from a “gold standard” and we have been working on optimizing these. This is why the `BCoV` (spiked-in bovine coronavirus) % recovery numbers are more consistent within an analysis day (or sometimes several days) than longer-term. It is very difficult to achieve an exact measure of the concentration of each spike and we discovered in early October each vial within the same lot can vary drastically from another. At the same time, this is the only recovery control that we have that captures the entire process.
+
+The submitted influent samples were analyzed for the presence of SARS-CoV-2 genetic material. FAQ from `Facts draft_DA.xlsx`:
+
+- What is included in my results?					
+    + Influent samples were analyzed for two markers that target SARS-CoV-2, `N1` and `N2`. These markers target the same gene product in the SARS-CoV-2 virus (nucleocapsid protein). Results are presented as the average of the gene copies of these two targets.					
+- What is gene copies/L?					
+    + Gene copies per liter is a unit of concentration of the genetic marker and refers to the number of detected copies of the specific gene target in the polymerase chain reaction (PCR) that are corrected for concentration and dilution factors and expressed as total gene copies per 1 liter of wastewater (sample). 					
+These could be calculated, but we did not provide them		
+- What is gene copies/day?					
+    + Gene copies per day refers to the calculated total quantity of gene copies (loading) arriving at the wastewater treatment facility over the 24-hour sample collection period. Determined as the product of concentration (gene copies per liter) in the 24 hr composite samples and 24-hr wastewater flow (liters per day). This parameter provides a measure of the total release of gene copies into the community's wastewater collection system. 					
+- What is gene copies/day/person?					
+    + To allow for better comparisons across wastewater systems and importantly to enable scaling of the prevalence of the virus in the study communities, we need to normalize the loading (gene copies/day) to the population contributing to the wastewater load. Thus, here we are simply dividing the 24-hr loading (gene copies/day) by the number of people in the WWTP service area.					
+- What is `PMMoV`?					
+    + This target is pepper mild mottle virus and is the most abundant RNA virus in human feces and therefore a good human fecal indicator. `PMMoV` can be used for normalization of SARS-CoV-2 concentration to the fecal load, but we have not normalized the data we are providing to you.
+
+**NOTE:** `AVG` is recalculated below to be the _geometric_ mean of `N1` and `N2` rather than the _arithmetic_ mean due to the scale range and need for log transform (much like pH). With missing data, `AVG` is set to the non-missing value, and is downweighted in analysis.
+
+Analysis below includes plots with straight line trends, first allowing lines to fit Sites separately, then with common slopes. There is not enough data yet to look for more complicated shapes, and there is no visual evidence of change of trend for any measurement. Analysis is type II analysis of variance: test for `Date:Site` interaction in presence of main effects, then test each main effect adjusting for the other main effect. Tables show p-values, with smaller values (say below 0.05) showing stronger evidence of trends.
+
+This document summarizes quarantine information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/wastewater.Rmd).
+
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(broom)
+kprint <- function(...) {
+  if(interactive()) {
+    print(...)
+  } else {
+    knitr::kable(...)
+  }
+}
+```
+
+```{r warning = FALSE, message = FALSE}
+tmpfn <- function(N1, N2) {
+  AVG <- sqrt(N1 * N2)
+  AVG <- ifelse(is.na(N1), N2, AVG)
+  ifelse(is.na(N2), N1, AVG)
+}
+water <- read_excel("data/wastewater/WW SARS-COV-2 Data V1.xlsx",
+                    na = c("","NA","0","Not Detected","Field Parameters to be filled in"),
+                    col_types = c("text", "date", rep("numeric", 9), "text")) %>%
+  rename(Date = "Collection Date",
+         pH = "pH (SU)",
+         Total_Flow = "Total Flow (MGD)",
+         Conductivity = "Conductivity (uS/CM@25C)",
+         N1 = "N1 (GC/L)",
+         N2 = "N2 (GC/L)",
+         PMMoV = "PMMoV (GC/L)",
+         Pct_BCoV = "% Recovery (BCoV)",
+         Comment = "...12") %>%
+  filter(!is.na(Site)) %>%
+  mutate(AVG = tmpfn(N1, N2),
+         wt = 2 - is.na(N1) - is.na(N2))
+```
+
+```{r}
+waters <- water %>%
+  select(-Comment, -pH, -Total_Flow) %>%
+  pivot_longer(Conductivity:Pct_BCoV, names_to = "assay", values_to = "values") %>%
+  filter(!is.na(values)) %>%
+  mutate(wt = ifelse(assay == "AVG", wt, 1))
+```
+
+```{r}
+predfn <- function(x) {
+  x$pred <- 10^predict(lm(log10(values) ~ Date + Site, x, weight = wt))
+  x
+}
+addpred <- function(x) {
+  bind_rows(
+    map(
+      split(x, x$assay),
+      predfn),
+    .id = "assay")
+}
+```
+
+```{r}
+fitfn <- function(x, add = FALSE, ...) {
+  if(add) {
+    form <- formula(log10(values) ~ Date + Site)
+    elems <- 2:3
+    test <- "drop1"
+  } else {
+    form <- formula(log10(values) ~ Date * Site)
+    elems <- 3
+    test <- "anova"
+  }
+  fit <- lm(form, x, weight = wt)
+  switch(test,
+         anova = broom::tidy(anova(fit)[elems,]),
+         drop1 = broom::tidy(drop1(fit, fit, test = "F")[elems,])) %>%
+    select(term, statistic, p.value) %>%
+    mutate(statistic = round(statistic, 2),
+           p.value = signif(p.value, 3))
+}
+sumfn <- function(x, ...) {
+  bind_rows(
+    map(
+      split(x, x$assay),
+      fitfn, ...),
+    .id = "assay") %>%
+    arrange(term, assay)
+}
+timefit <- function(x) {
+  bind_rows(
+    sumfn(x, TRUE),
+    sumfn(x)) %>%
+  select(-statistic) %>%
+  pivot_wider(names_from = "term", values_from = "p.value") %>%
+  kprint()
+}
+```
+
+### Conductivity and TSS 
+
+```{r warning = FALSE}
+ggplot(waters %>% filter(assay %in% c("Conductivity", "TSS"))) +
+  aes(Date, values) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_grid(assay ~ Site, scales = "free_y")
+```
+
+### Madison and UW Sites Only
+
+```{r warning = FALSE}
+ggplot(waters %>%
+         filter(!(assay %in% c("Conductivity", "TSS")),
+                !grepl("MMSD", Site))) +
+  aes(Date, values) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_grid(assay ~ Site, scales = "free_y")
+```
+
+### MMSD 5 Sites
+
+```{r warning = FALSE}
+ggplot(waters %>% filter(grepl("MMSD", Site))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "lm", se = FALSE, weight = "wt", formula = "y ~ x") +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
+
+```{r warning = FALSE}
+ggplot(addpred(waters %>% filter(grepl("MMSD", Site)))) +
+  aes(Date, values, col = Site, z = Site) +
+  geom_line(aes(y = pred), size = 1) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
+
+```{r}
+timefit(waters %>% filter(grepl("MMSD", Site)))
+```
+
+### PMMoV and Pct_BCoV
+
+```{r}
+ggplot(waters %>% filter(assay %in% c("PMMoV", "Pct_BCoV"))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "lm", se = FALSE, size = 1) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
+
+
+```{r warning = FALSE}
+ggplot(addpred(waters %>% filter(assay %in% c("PMMoV", "Pct_BCoV")))) +
+  aes(Date, values, col = Site, z = Site) +
+  geom_line(aes(y = pred), size = 1) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
+
+```{r}
+timefit(waters %>% filter(assay %in% c("PMMoV", "Pct_BCoV")))
+```
+
+### PMMoV and Pct_BCoV without Madison
+
+```{r}
+ggplot(waters %>% 
+         filter(assay %in% c("PMMoV", "Pct_BCoV"),
+                Site != "Madison")) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "lm", se = FALSE, size = 1) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
+
+
+```{r warning = FALSE}
+ggplot(addpred(waters %>% 
+         filter(assay %in% c("PMMoV", "Pct_BCoV"),
+                Site != "Madison"))) +
+  aes(Date, values, col = Site, z = Site) +
+  geom_line(aes(y = pred), size = 1) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
+
+```{r}
+timefit(waters %>% filter(assay %in% c("PMMoV", "Pct_BCoV")))
+```
+
+### Comparison of N1 and N2 with Other Measurements
+
+```{r}
+ggplot(water) +
+  aes(N1, N2, col = log10(PMMoV)) +
+  geom_abline(slope = 1, intercept = 0, col = "darkgray") +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() +
+  facet_wrap(~ Site)
+```
+
+```{r warning = FALSE}
+ggplot(water) +
+  aes(AVG, PMMoV, col = Date) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() +
+  facet_wrap(~ Site)
+```
+
+```{r warning = FALSE}
+ggplot(water) +
+  aes(Date, sqrt(N1*N2), col = log10(PMMoV)) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_point() +
+  scale_y_log10() +
+  facet_wrap(~ Site)
+```
+
+```{r warning = FALSE}
+ggplot(water) +
+  aes(Date, Pct_BCoV) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_point() +
+  scale_y_log10() +
+  facet_wrap(~ Site)
+```

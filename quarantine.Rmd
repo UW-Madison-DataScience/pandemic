@@ -2,6 +2,7 @@
 title: "DRAFT Quarantine Summary"
 author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
 output:
+  word_document: default
   html_document:
     df_print: paged
 ---
