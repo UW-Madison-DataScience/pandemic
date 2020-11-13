@@ -77,7 +77,9 @@ water <- read_excel("data/wastewater/WW SARS-COV-2 Data V1.xlsx",
          Comment = "...12") %>%
   filter(!is.na(Site)) %>%
   mutate(AVG = tmpfn(N1, N2),
-         wt = 2 - is.na(N1) - is.na(N2))
+         wt = 2 - is.na(N1) - is.na(N2),
+         Site = ifelse(Site == "UW-D", "UW-Lakeshore", Site),
+         Site = ifelse(Site == "UW-S", "UW-Sellery", Site))
 ```
 
 ```{r}
