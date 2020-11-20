@@ -1,0 +1,115 @@
+---
+title: "BOX UHS Download"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, comment = "")
+```
+
+```{r}
+library(tidyverse)
+kprint <- function(x) {
+  if(interactive()) {
+    print(x)
+  } else {
+    knitr::kable(x)
+  }
+}
+```
+
+```{r eval=FALSE}
+library(boxr)
+# Need to download this file; could use boxr package
+# Need Client Secret, which I don't yet understand.
+box_auth("byandell@wisc.edu")
+filename <- scan("data/housing_data_url.txt", "text")
+cdc0 <- box_read(filename)
+```
+
+```{r}
+filename <- scan("data/housing_data_url.txt", "text", n = 1)
+filename <- "data/MasterQuery_WithHousing_20201120.csv"
+cdc0 <- read.csv(filename, row.names = NULL) %>%
+  select(PatientID, Group, Residence_Hall, Race,
+         ResultDate, CollectionDate, ConfirmedDate, TracedDate,
+         TestLocation, LabName, Result,
+         HasSymptoms, QuarantineStatus, QuarantineLocation, NumberOfContacts) %>%
+  filter(!is.na(PatientID),
+         Result %in% c("Positive","Negative")) %>%
+  mutate(Race = ifelse(Race %in% c("", "DECLINED", "OTHER RACE"), NA, Race),
+         Positive = 1 * (Result == "Positive"))
+# Replace PatientID with randomized RANDID
+IDs <- (cdc0 %>% distinct(PatientID) %>% arrange(PatientID))$PatientID
+set.seed(1)
+Rand <- order(runif(length(IDs)))
+cdc0 <- cdc0 %>%
+  mutate(RANDID = Rand[match(PatientID, IDs)]) %>%
+  select(-PatientID) %>%
+  filter(Residence_Hall != "", Group == "Student")
+```
+
+```{r}
+lakeshore <- c("Adams", "Bradley", "Cole", "Dejope", "Kronshage", "Leopold", "Phillips", "Slichter", "Sullivan", "Tripp", "Waters")
+southeast <- c("Barnard", "Chadbourne", "Davis", "Merit", "Ogg", "Sellery", "Smith", "Witte")
+cdc0 <- cdc0 %>%
+  mutate(Hall_Nbhd = "Lakeshore",
+         Hall_Nbhd = ifelse(Residence_Hall %in% southeast, "SouthEast", Hall_Nbhd))
+```
+
+### Useful Columns for Modelers
+
+The following columns would be useful to share with campus modelers. They appear to contain no PHI or PII but have sufficient data for modelers to study patterns of infection. Please note that this is based on data through 5 October 2020. See details below for study of fields
+
+- RANDID (carefully randomized from PatientID)
+- Group (`sors` identifies faculty)
+- ResultDate, CollectionDate, ConfirmedDate, TracedDate (dropping time of day)
+- QuarantineStatus, HasSymptoms, NumberOfContacts
+- RANDHALL (FAKEHALL adding in 3 small halls and moving all small halls to 0)
+- RANDHOUS (new randomization within hall and across houses and floors)
+- RANDROOM (room number modulus 100 to remove floor)
+- Positive
+
+```{r}
+# Pivot longer; create RANDROOM, filter out missing Date.
+cdc <- cdc0 %>%
+  pivot_longer(ResultDate:TracedDate, names_to = "Event", values_to = "Date") %>%
+  mutate(Event = factor(Event, c("CollectionDate", "ResultDate",
+                                 "ConfirmedDate", "TracedDate")),
+         # Remove time of day from Date
+         Date = as.Date(Date, "%m/%d/%Y")) %>%
+  # For now, remove data with weird dates
+  filter(!is.na(Date),
+         Date > as.Date("2020-01-01")) %>%
+  # Filter out Confirmed or Traced Date that have Positive = 0
+  filter(!(Event %in% c("ConfirmedDate", "TracedDate")) | Positive == 1)
+```
+
+```{r}
+# This step is tricky.
+# ConfirmedDate and TracedDate are repeated sometimes with old CollectionDate.
+cdc <- cdc %>%
+  distinct(RANDID, Date, Event, .keep_all = TRUE) %>%
+  arrange(Residence_Hall, RANDID, Date) %>%
+  select(-Result, -Group) %>%
+  select(RANDID, Residence_Hall, Date, Event, Positive, everything())
+```
+
+```{r}
+ggplot(cdc %>%
+         filter(Event == "CollectionDate") %>%
+         count(RANDID, name = "collections") %>% 
+         count(collections, name = "frequency")) +
+  aes(collections, frequency) +
+  geom_point() +
+  geom_line()
+```
+
+```{r}
+# Note: data contains some off campus, some faculty.
+write.csv(cdc, "data/uhs_housing.csv", row.names = FALSE)
+```
+
+This document summarizes housing information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/box_uhs_housing.Rmd).

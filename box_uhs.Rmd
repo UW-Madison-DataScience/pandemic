@@ -59,7 +59,7 @@ cdc0 <- box_read(filename)
 ```
 
 ```{r eval=FALSE}
-filename <- scan("data/housing_data_url.txt", "text")
+filename <- scan("data/housing_data_url.txt", "text", n = 1)
 cdc0 <- read.csv(filename, row.names = NULL)
 ```
 
