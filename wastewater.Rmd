@@ -74,7 +74,10 @@ water_Interceptors <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
                     col_types = c("text", "date", rep("numeric", 8), "text"),
                     sheet = 2) %>%
   rename(Comment = "...11") %>%
-  mutate(TSS = NA) %>%
+  mutate(TSS = NA,
+         Site = ifelse(Site == "MMSD P02", "MMSD P2", Site),
+         Site = ifelse(Site == "MMSD P07", "MMSD P7", Site),
+         Site = ifelse(Site == "MMSD P08", "MMSD P8", Site)) %>%
   select(1:5, TSS, everything())
 water_UW_Dorms <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
                     na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
@@ -186,6 +189,15 @@ ggplot(waters %>%
 ```
 
 ### MMSD 5 Sites
+
+```{r warning = FALSE}
+ggplot(waters %>% filter(grepl("MMSD", Site))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt") +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
 
 ```{r warning = FALSE}
 ggplot(waters %>% filter(grepl("MMSD", Site))) +
