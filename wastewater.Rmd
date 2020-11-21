@@ -48,7 +48,6 @@ This document summarizes quarantine information. The R code file can be found in
 library(tidyverse)
 library(readxl)
 library(broom)
-library(googlesheets4)
 library(RcppRoll)
 kprint <- function(...) {
   if(interactive()) {
@@ -59,21 +58,33 @@ kprint <- function(...) {
 }
 ```
 
-```{r eval=FALSE}
-# do this once to authorize within google sheets
-gs4_auth(email = "byandell@wisc.edu",
-         scopes = "https://www.googleapis.com/auth/spreadsheets.readonly")
-```
-
 ```{r warning = FALSE, message = FALSE}
 tmpfn <- function(N1, N2) {
   AVG <- sqrt(N1 * N2)
   AVG <- ifelse(is.na(N1), N2, AVG)
   ifelse(is.na(N2), N1, AVG)
 }
-water <- read_excel("data/wastewater/WW SARS-COV-2 Data V1.xlsx",
-                    na = c("","NA","0","Not Detected","Field Parameters to be filled in"),
-                    col_types = c("text", "date", rep("numeric", 9), "text")) %>%
+water_MMSD <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
+                    na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
+                    col_types = c("text", "date", rep("numeric", 9), "text"),
+                    sheet = 1) %>%
+  rename(Comment = "...12")
+water_Interceptors <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
+                    na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
+                    col_types = c("text", "date", rep("numeric", 8), "text"),
+                    sheet = 2) %>%
+  rename(Comment = "...11") %>%
+  mutate(TSS = NA) %>%
+  select(1:5, TSS, everything())
+water_UW_Dorms <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
+                    na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
+                    col_types = c("text", "date", rep("numeric", 9), rep("text", 2)),
+                    sheet = 3)[,-13] %>%
+  rename(Comment = "...12")
+water <- 
+  bind_rows(water_MMSD,
+            water_Interceptors,
+            water_UW_Dorms) %>%
   rename(Date = "Collection Date",
          pH = "pH (SU)",
          Total_Flow = "Total Flow (MGD)",
@@ -81,12 +92,11 @@ water <- read_excel("data/wastewater/WW SARS-COV-2 Data V1.xlsx",
          N1 = "N1 (GC/L)",
          N2 = "N2 (GC/L)",
          PMMoV = "PMMoV (GC/L)",
-         Pct_BCoV = "% Recovery (BCoV)",
-         Comment = "...12") %>%
+         Pct_BCoV = "% Recovery (BCoV)") %>%
   filter(!is.na(Site)) %>%
   mutate(AVG = tmpfn(N1, N2),
          wt = 2 - is.na(N1) - is.na(N2),
-         Site = ifelse(Site == "UW-D", "UW-Lakeshore", Site),
+         Site = ifelse(Site == "UW-D", "UW-LakeShore", Site),
          Site = ifelse(Site == "UW-S", "UW-Sellery", Site))
 ```
 
@@ -293,14 +303,28 @@ ggplot(water) +
   facet_wrap(~ Site)
 ```
 
+```{r}
+ggplot(water %>% filter(!is.na(Total_Flow))) +
+  aes(Total_Flow, AVG) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() +
+  facet_wrap(~ Site, scales = "free")
+```
+
 ## Covid Cases
 
 ```{r}
 roll7 <- function(x) {
-  x <- roll_mean(x, 7)
-  c(rep(x[1], 6), x)
+  n7 <- min(length(x), 7)
+  x <- roll_mean(x, n7)
+  if(n7 > 1) {
+    x <- c(rep(x[1], n7 - 1), x)
+  }
+  x
 }
-cases <- "data/uhs_housing.csv"
+cases <- "data/uhs_rand.csv"
 cases <- read.csv(cases) %>%
   filter(Positive == 1,
          Event == "CollectionDate") %>%
@@ -308,11 +332,11 @@ cases <- read.csv(cases) %>%
   arrange(RANDID, Date) %>%
   # Drop multiple positive tests
   distinct(RANDID, .keep_all = TRUE) %>% 
-  # Focus on Lakeshore and Sellery
-  rename(Site = "Hall_Nbhd") %>%
-  filter(Site == "Lakeshore" | Residence_Hall == "Sellery") %>%
-  mutate(Site = ifelse(Site == "SouthEast",
-                            "UW-Sellery", "UW-Lakeshore")) %>%
+  # Focus on LakeShore and Sellery
+  rename(Site = "Neighborhood") %>%
+  mutate(Site = paste0("UW-", Site),
+         Site = ifelse(Site == "UW-SouthEast" & Hall_Name %in% c("Sellery","Witte"),
+                       paste0("UW-", Hall_Name), Site)) %>%
   count(Date, Site, name = "Positive")
 ```
 
@@ -332,7 +356,7 @@ case_water <-
   full_join(
     water %>%
       select(-Comment, -pH, -Total_Flow) %>%
-      filter(Site %in% c("UW-Lakeshore", "UW-Sellery")),
+      filter(Site %in% c("UW-LakeShore", "UW-Sellery")),
     cases,
     by = c("Date", "Site"))
 ```
@@ -346,14 +370,18 @@ case_waters <- case_water %>%
   select(Positive, Conductivity:Pct_BCoV, everything()) %>%
   pivot_longer(Positive:Pct_BCoV, names_to = "assay", values_to = "values") %>%
   filter(!is.na(values)) %>%
-  mutate(wt = ifelse(assay == "AVG", wt, 1))
+  mutate(wt = ifelse(assay == "AVG", wt, 1)) %>%
+  arrange(Date) %>%
+  group_by(Site, assay) %>%
+  mutate(roll = roll7(values)) %>%
+  ungroup
 ```
 
 Now plot side by side cases and water meas over time, and consider time lags.
 
-```{r}
+```{r fig.height = 10}
 ggplot(case_waters %>% 
-         filter(assay %in% c("Positive", "AVG","PMMoV","Pct_BCoV"))) +
+         filter(assay %in% c("Positive", "N1", "N2", "AVG","PMMoV","Pct_BCoV"))) +
   aes(Date, values, col = Site) +
   geom_smooth(method = "loess", se = FALSE, size = 1) +
   geom_point(alpha = 0.5) +
@@ -361,3 +389,14 @@ ggplot(case_waters %>%
   facet_grid(assay ~ Site, scales = "free")
 ```
 
+
+```{r}
+ggplot(case_waters %>% 
+         filter(assay %in% c("Positive", "AVG"),
+                Site %in% c("UW-LakeShore", "UW-Sellery"))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "loess", se = FALSE, size = 1) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_grid(assay ~ Site, scales = "free")
+```

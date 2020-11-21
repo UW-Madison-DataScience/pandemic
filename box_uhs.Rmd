@@ -20,6 +20,29 @@ kprint <- function(x) {
 }
 ```
 
+## Useful Columns for Modelers
+
+The following columns would be useful to share with campus modelers. They appear to contain no PHI or PII but have sufficient data for modelers to study patterns of infection. Please note that this is based on data through 5 October 2020. See details below for study of fields
+
+- RANDID (carefully randomized from PatientID)
+- Race
+- ResultDate, CollectionDate, ConfirmedDate, TracedDate (dropping time of day)
+- QuarantineStatus, HasSymptoms, NumberOfContacts
+- TestLocation, LabName, Result
+- Hall_Name
+- Neighborhood (LakeShore or SouthEast)
+- RANDHOUS (new randomization within hall and across houses and floors)
+- RANDROOM (room number modulus 100 to remove floor)
+- Positive
+
+The following are removed from the data but kept locally in lookup table:
+
+- House_Name (recoded with Floor as RANDROOM)
+- Floor (100s number from Room)
+- Room (recoded as RANDID using FLIP)
+
+## Access Original Data
+
 ```{r eval=FALSE}
 From: "wiscit@doit.wisc.edu" <wiscit@doit.wisc.edu>
 Date: Tuesday, October 13, 2020 at 1:13 PM
@@ -51,311 +74,144 @@ Jeannine
 
 ```{r eval=FALSE}
 library(boxr)
-# Need to download this file; could use boxr package
-# Need Client Secret, which I don't yet understand.
+# Ideally use boxr package to box_read() file. However
+# Need Client Secret, which I don't yet understand. See email above.
 box_auth("byandell@wisc.edu")
-filename <- scan("data/housing_data_url.txt", "text")
+filename <- scan("data/housing_data_url.txt", "text", n = 1)
 cdc0 <- box_read(filename)
 ```
 
 ```{r eval=FALSE}
+# This sometimes work, but generally gives empty file if done in Rmarkdown.
+# What works is to download file and use that directly.
 filename <- scan("data/housing_data_url.txt", "text", n = 1)
 cdc0 <- read.csv(filename, row.names = NULL)
 ```
 
-```{r}
-cdc0 <- read.csv("data/matchforCDC-PHI.csv")
-```
-
-### Useful Columns for Modelers
-
-The following columns would be useful to share with campus modelers. They appear to contain no PHI or PII but have sufficient data for modelers to study patterns of infection. Please note that this is based on data through 5 October 2020. See details below for study of fields
-
-- RANDID (carefully randomized from PatientID)
-- Group (`sors` identifies faculty)
-- Campus (on or off campus)
-- ResultDate, CollectionDate, ConfirmedDate, TracedDate (dropping time of day)
-- QuarantineStatus, HasSymptoms, NumberOfContacts
-- RANDHALL (FAKEHALL adding in 3 small halls and moving all small halls to 0)
-- RANDHOUS (new randomization within hall and across houses and floors)
-- RANDROOM (room number modulus 100 to remove floor)
-- Positive
-
-### Study of Halls, Houses and Rooms
-
-`Residence_Hall`, `Hall` and `FAKEHALL` are related but do not have identical information. It is possible the discrepancy between `Residence_Hall` and `Hall` indicates students who moved.
+Read data, select columns, do initial cleaning. Focus on students on campus.
 
 ```{r}
-cdc0 %>%
-  count(Residence_Hall, Hall) %>%
-  filter(Residence_Hall != Hall) %>%
-  arrange(desc(n))
+#filename <- "data/MasterQuery_WithHousing_20201120.csv"
+filename <- "data/MasterQuery_HousingSubset_20201120.csv"
+cdc0 <- read.csv(filename, row.names = NULL) %>%
+  select(PatientID, Group, hall_housingfile, House_Name, Room, Race,
+         ResultDate, CollectionDate, ConfirmedDate, TracedDate,
+         TestLocation, LabName, Result,
+         HasSymptoms, QuarantineStatus, NumberOfContacts) %>%
+  rename(Hall_Name = "hall_housingfile") %>%
+  filter(!is.na(PatientID),
+         Result %in% c("Positive","Negative")) %>%
+  mutate(Race = ifelse(Race %in% c("", "DECLINED", "OTHER RACE"), NA, Race),
+         Positive = 1 * (Result == "Positive")) %>%
+  filter(Hall_Name != "Off campus", Group == "Student")
 ```
-The `FAKEHALL` largely captures the `Hall`, with the exception of missing values for a few small halls (Barnard, Davis, Merit).
+
+Replace `PatientID` with randomized `RANDID`
 
 ```{r}
-full_join(
-  cdc0 %>%
-    distinct(Hall, FAKEHALL, House_Name, FAKEHOUS) %>%
-    count(Hall, FAKEHALL, name = "houses"),
-  cdc0 %>%
-    count(Hall, FAKEHALL, House_Name, FAKEHOUS) %>%
-    count(Hall, FAKEHALL, name = "records"),
-  by = c("Hall", "FAKEHALL")) %>%
-  arrange(desc(records))
-```
-
-`FAKEHOUS` and `fakeroom` have some challenges. The larger halls (Witte, Sellery, Chadbourne, Ogg) have floor wing names (`House_Name`) that are alphabetically ordered by floor, and this ordering is preserved in `FAKEHOUS`. Some other halls have house names that are more scrambled. Knowing floor would be important if there was evidence of transmission floor to floor, but that seems less likely; we recommend re-randomizing house names. The `fakeroom` is monotome with the `Room`, which means to some degree room number could be reverse engineered if one knew the hall and house. On the other hand, knowing the geographic arrangement of rooms is important for modeling, so the distortion of `fakeroom` is problematic, and we propose merely removing the floor identifier (change 911 to 11 for instance) provides sufficient information for within floor modeling.
-
-```{r eval=FALSE}
-cdc0 %>%
-  filter(FAKEHOUS != 1000000) %>%
-  mutate(Room = floor(Room / 100)) %>%
-  rename(Floor = Room) %>%
-  distinct(Hall, House_Name, FAKEHOUS, Floor) %>%
-  arrange(Hall, House_Name, Floor)
-```
-
-### Examination of Columns
-
-The following columns seem to have PHI or PII:
-
-- PatientID
-- PatientNumber
-- Photo_ID
-- Campus_ID
-- Last_Name
-- First_Name
-- Date_of_Birth
-
-The following might be PHI or PII:
-
-- LabTestResultId
-- LabAccessionId
-- CollectionDate (part having exact time of day)
-- ContactNotes
-- PVI
-
-The following could identify specific housing information. These are partially obscured with FAKEHALL, FAKEHOUS and fakeroom. There are some problems with these for 
-
-- Residence_Hall
-- Hall
-- House_Name
-- Room
-
-### Randomization Suggestions
-
-Some time ago I studied random number generation, and I have some concerns about using an approach such as
- 
-```
-NewID = FLOOR(RAND(PatientID) * 1000000)
-```
-
-There are two main problems:
-This can lead to two patients with the same NewID due to roundoff (from `floor()`).
-Resetting the seed by patient ID can result in NewIDs that are highly correlated with consecutive or closely numbered patient IDs
-Basically, `rand()` values can be arbitrarily close to each other, so multiplying by 1M is not adequate. With 20K cases (about what we have), I found several hundred duplicate NewIDs. For the second point, (pseudo-)random number generators are not designed to reset the seed in this way. In particular, linear congruential PRNGs can show banded patterns of similar values when seeds are near each other.
- 
-Here is another way that seems to work and address both of these problems. Code is from R, but should be easily translated:
-
-```
-IDs <- unique(PatientID)
+IDs <- (cdc0 %>% distinct(PatientID) %>% arrange(PatientID))$PatientID
 set.seed(1)
 Rand <- order(runif(length(IDs)))
-NewID <- Rand[match(PatientID, IDs)]
-```
-
-That is, generate n (= number of unique patients) random numbers and replace those with their order, so now you have the numbers 1,2,…,n in random order. Then replace the ith PatientID with the order number of the ith random number.
-
-A similar calculation could be used to re-randomize the house within hall. The room number can be anonymized to floor by `floor(Room / 100)`.
-
-### Pattern of Missing Data
-
-There are missing data for some columns. All columns are listed below with the number of non-blank entries.
-
-```{r}
-sapply(cdc0, function(x) sum(!is.na(x) & x != ""))
-```
-### Rerandomize data
-
-Select desired columns. Create `RANDHALL` by collapsing across smaller halls.
-
-```{r}
-if(is.na(match("Group", names(cdc0))) | !is.na(match("sors", names(cdc0)))) {
-  cdc0 <- cdc0 %>%
-    rename(Group = "sors")
-}
 cdc0 <- cdc0 %>%
-  select(PatientID, Group,
-         ResultDate, CollectionDate, ConfirmedDate, TracedDate,
-         QuarantineStatus, HasSymptoms, NumberOfContacts,
-         Residence_Hall, Hall, House_Name, Room,
-         fakeroom, FAKEHALL, FAKEHOUS,
-         Positive) %>%
-  filter(!is.na(PatientID)) %>%
-  mutate(House_Name = ifelse(Hall %in% c("Barnard","Davis","Merit"), Hall, House_Name),
-         RANDHALL = ifelse(Hall %in% c("Barnard","Davis","Merit"), 0, FAKEHALL),
-         RANDHALL = ifelse(is.na(RANDHALL), -1, RANDHALL),
-         Campus = ifelse(Residence_Hall == "off campus", "off", "on")) %>%
-  select(-Residence_Hall)
+  mutate(RANDID = Rand[match(PatientID, IDs)]) %>%
+  select(-PatientID, -Group)
 ```
+
+Assign `Hall_Name`s to `Neighborhood`.
 
 ```{r}
-# Collapse RANDHALL across smaller Halls 
-Min_Pos <- 15
-SmallHall <- (cdc0 %>%
-  filter(Positive == 1) %>%
-  count(RANDHALL) %>%
-  filter(n < Min_Pos))$RANDHALL
-CleanHouse <- (cdc0 %>%
-  filter(Positive == 1,
-         RANDHALL %in% SmallHall) %>%
-  count(RANDHALL, FAKEHOUS))$FAKEHOUS
+lakeshore <- c("Adams", "Bradley", "Cole", "Dejope", "Kronshage", "Leopold", "Phillips", "Slichter", "Sullivan", "Tripp", "Waters")
+southeast <- c("Barnard", "Chadbourne", "Davis", "Merit", "Ogg", "Sellery", "Smith", "Witte")
 cdc0 <- cdc0 %>%
-  mutate(RANDHALL = ifelse(RANDHALL %in% SmallHall, 0, RANDHALL)) %>%
-  filter((RANDHALL != 0) | (RANDHALL == 0 & FAKEHOUS %in% CleanHouse))
+  mutate(Neighborhood = "LakeShore",
+         Neighborhood = ifelse(Hall_Name %in% southeast, "SouthEast", Neighborhood))
 ```
 
-Re-randomize house as `RANDOUS` using `FAKEHOUS` and floor.
+Randomize `House_Name` and `Floor` to `RANDHOUS` and `Room` to `RANDROOM`.
 
 ```{r}
 # Re-randomize House as RANDHOUS within RANDHALL
 Rehouse <- cdc0 %>%
   # Break up houses with multiple floors
   mutate(Floor = floor(Room / 100)) %>%
-  distinct(Hall, RANDHALL, House_Name, FAKEHOUS, Floor) %>%
-  group_by(RANDHALL) %>%
-  mutate(Hall = Hall,
-         FAKEHOUS = FAKEHOUS,
-         Floor = Floor,
+  distinct(Hall_Name, House_Name, Floor) %>%
+  group_by(Hall_Name) %>%
+  mutate(Floor = Floor,
          RANDHOUS = order(runif(n()))) %>%
   ungroup
 cdc0 <- 
   left_join(
-    cdc0 %>% mutate(Floor = floor(Room / 100)),
+    cdc0 %>%
+      mutate(Floor = floor(Room / 100),
+             RANDROOM = Room %% 100), # Could flip a coin on this.
     Rehouse,
-    by = c("Hall", "RANDHALL", "House_Name", "FAKEHOUS", "Floor"))
+    by = c("Hall_Name", "House_Name", "Floor"))
 ```
 
-```{r eval=FALSE}
-Rehouse %>%
-  group_by(Hall, RANDHALL) %>%
-  summarize(fakes = paste(sort(RANDHOUS), collapse = ",")) %>%
-  arrange(RANDHALL)
-```
-
-Table with range of rooms and floors by hall.
+Flip room numbers randomly.
 
 ```{r}
-cdc0 %>%
-  group_by(RANDHALL) %>%
-  summarize(Room_range = paste(range(Room %% 100), collapse = "-"),
-            Floor_range = paste(range(Floor), collapse = "-"),
-            Houses = length(unique(FAKEHOUS)),
-            RHouses = length(unique(RANDHOUS)),
-            Floors = length(unique(Floor))) %>%
-  ungroup %>%
-  kprint()
+cdc0 <- cdc0 %>%
+  group_by(Hall_Name, RANDHOUS) %>%
+  mutate(Flip = sign(runif(1) - 0.5),
+         RANDROOM = ifelse(Flip < 0, 
+                           1 + max(RANDROOM) - Flip * RANDROOM, # Flip room number if negative
+                           RANDROOM)) %>%
+  ungroup
 ```
-Write out code book for `RANDHALL`, `RANDHOUS` and `RANDID`.
+
+Write out codebook.
 
 ```{r}
 write.csv(cdc0 %>%
-  distinct(Hall, FAKEHALL, RANDHALL, House_Name, FAKEHOUS, RANDHOUS, Floor) %>%
-  select(Hall, FAKEHALL, RANDHALL, House_Name, FAKEHOUS, RANDHOUS, Floor) %>%
-  arrange(Hall, House_Name, Floor),
+  distinct(Neighborhood, Hall_Name, House_Name, RANDHOUS, Floor, Flip) %>%
+  arrange(Neighborhood, Hall_Name, House_Name, Floor),
   "data/uhs_codebook.csv", row.names = FALSE)
 ```
 
-```{r}
-# Randomize PatientID as RANDID.
-# Cannot simply do floor(rand * 1000000) as they may not all be unique.
-IDs <- (cdc0 %>% distinct(PatientID) %>% arrange(PatientID))$PatientID
-set.seed(1)
-Rand <- order(runif(length(IDs)))
-cdc0 <- cdc0 %>%
-  mutate(RANDID = Rand[match(PatientID, IDs)])
-
-write.csv(data.frame(PatientID = IDs, RANDID = Rand), "data/uhs_codeID.csv",
-          row.names = FALSE)
-```
-
-Write out de-identified data.
+Pivot to have one event per row per student.
 
 ```{r}
 # Pivot longer; create RANDROOM, filter out missing Date.
 cdc <- cdc0 %>%
+  select(-House_Name, -Room, -Result, -Floor, -Flip) %>%
   pivot_longer(ResultDate:TracedDate, names_to = "Event", values_to = "Date") %>%
-  mutate(RANDROOM = Room %% 100,
-         Event = factor(Event, c("CollectionDate", "ResultDate",
+  mutate(Event = factor(Event, c("CollectionDate", "ResultDate",
                                  "ConfirmedDate", "TracedDate")),
          # Remove time of day from Date
          Date = as.Date(Date, "%m/%d/%Y")) %>%
   # For now, remove data with weird dates
-  filter(!is.na(Positive),
-         !is.na(Date),
+  filter(!is.na(Date),
          Date > as.Date("2020-01-01")) %>%
   # Filter out Confirmed or Traced Date that have Positive = 0
-  filter(!(Event %in% c("ConfirmedDate", "TracedDate")) | Positive == 1)
-```
-
-```{r}
+  filter(!(Event %in% c("ConfirmedDate", "TracedDate")) | Positive == 1) %>%
 # This step is tricky.
 # ConfirmedDate and TracedDate are repeated sometimes with old CollectionDate.
-cdc <- cdc %>%
   distinct(RANDID, Date, Event, .keep_all = TRUE) %>%
-  select(RANDID, Group, Campus, Date, Event,
-         Positive,
-         QuarantineStatus, HasSymptoms, NumberOfContacts,
-         RANDHALL, RANDHOUS, RANDROOM) %>%
-  arrange(RANDHALL, RANDHOUS, RANDROOM, Date)
+  arrange(Hall_Name, RANDID, Date) %>%
+  select(RANDID, RANDROOM, RANDHOUS, Hall_Name, Neighborhood, Date, Event, Positive, everything())
 ```
 
 ```{r}
-# Note: data contains some off campus, some faculty.
+ggplot(bind_rows(
+    cdc %>%
+      filter(Event == "CollectionDate") %>%
+      count(RANDID, Positive, name = "collections") %>% 
+      count(Positive, collections, name = "frequency") %>%
+      mutate(Positive = c("Negative","Positive")[1 + Positive]),
+    cdc %>%
+      filter(Event == "CollectionDate") %>%
+      count(RANDID, name = "collections") %>% 
+      count(collections, name = "frequency") %>%
+      mutate(Positive = "Combined"))) +
+  aes(collections, frequency, col = Positive, group = Positive) +
+  geom_point() +
+  geom_line() +
+  ggtitle("Frequency of collections across students")
+```
+
+```{r}
 write.csv(cdc, "data/uhs_rand.csv", row.names = FALSE)
 ```
 
 This document summarizes housing information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/box_uhs.Rmd).
-
-```{r}
-knitr::knit_exit()
-```
-
-### Various plots
-
-```{r}
-ggplot(cdc0 %>% filter(FAKEHALL == 16)) +
-  aes(Room, fakeroom) +
-  geom_point()
-```
-
-```{r}
-ggplot(data.frame(x=IDs,y=NEWID)) +
-  aes(x,y) +
-  geom_point() +
-  geom_smooth()
-```
-
-```{r}
-cdc0 %>%
-  count(Hall, FAKEHALL) %>%
-  arrange(desc(n))
-```
-
-```{r}
-cdc0 %>%
-  filter(Hall == "Sellery") %>%
-  count(House_Name, FAKEHOUS) %>%
-  arrange(FAKEHOUS)
-```
-
-```{r}
-ggplot(cdc %>% distinct())
-```
-
-```{r}
-save(cdc0, file = "data/PnCdump.rda")
-```
-
-
