@@ -190,10 +190,28 @@ ggplot(waters %>%
 
 ### MMSD 5 Sites
 
+The MMSD sites are (I think) sewage pumping stations in the [MMSD Service Area](https://www.madsewer.org/About-Us/Service-Area) (see interactive map). P2 and P8 are closest to south side of campus.
+
+- P2: Brittingham Park (S Park St & E Washington Ave)
+- P7: W Monona (W Broadway & Yahara River)
+- P8: Fish Hatchery Rd & Wingra Dr
+- P11: S Madison (near Rimrock Rd & Hwy 14)
+- P18 E Monona (E Broadway near Stoughton Rd/51)
+
+```{r warning = FALSE}
+ggplot(waters %>% filter(grepl("MMSD", Site), assay %in% c("N1","N2","AVG"))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt",
+              formula = "y ~ x", span = 0.5) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_grid(Site ~ assay, scales = "free_y")
+```
+
 ```{r warning = FALSE}
 ggplot(waters %>% filter(grepl("MMSD", Site))) +
   aes(Date, values, col = Site) +
-  geom_smooth(method = "loess", se = FALSE, weight = "wt") +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt", span = 0.5) +
   geom_point(alpha = 0.5) +
   scale_y_log10() +
   facet_wrap(~ assay, scales = "free_y")
@@ -226,6 +244,15 @@ timefit(waters %>% filter(grepl("MMSD", Site)))
 ```{r}
 ggplot(waters %>% filter(assay %in% c("PMMoV", "Pct_BCoV"))) +
   aes(Date, values, col = Site) +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt", span = 0.5) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
+
+```{r}
+ggplot(waters %>% filter(assay %in% c("PMMoV", "Pct_BCoV"))) +
+  aes(Date, values, col = Site) +
   geom_smooth(method = "lm", se = FALSE, size = 1) +
   geom_point(alpha = 0.5) +
   scale_y_log10() +
@@ -253,12 +280,22 @@ ggplot(waters %>%
          filter(assay %in% c("PMMoV", "Pct_BCoV"),
                 Site != "Madison")) +
   aes(Date, values, col = Site) +
-  geom_smooth(method = "lm", se = FALSE, size = 1) +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt", span = 0.5) +
   geom_point(alpha = 0.5) +
   scale_y_log10() +
   facet_wrap(~ assay, scales = "free_y")
 ```
 
+```{r}
+ggplot(waters %>% 
+         filter(assay %in% c("PMMoV", "Pct_BCoV"),
+                Site != "Madison")) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "lm", se = FALSE, size = 1) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y")
+```
 
 ```{r warning = FALSE}
 ggplot(addpred(waters %>% 
@@ -290,7 +327,10 @@ ggplot(water) +
 ```{r warning = FALSE}
 ggplot(water) +
   aes(AVG, PMMoV, col = Date) +
-  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt", span = 0.75,
+              col = "darkgray", size = 1) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x",
+              col = "black", size = 1) +
   geom_point() +
   scale_x_log10() +
   scale_y_log10() +
@@ -300,7 +340,10 @@ ggplot(water) +
 ```{r warning = FALSE}
 ggplot(water) +
   aes(Date, sqrt(N1*N2), col = log10(PMMoV)) +
-  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt", span = 0.75,
+              col = "darkgray", size = 1) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x",
+              col = "black", size = 1) +
   geom_point() +
   scale_y_log10() +
   facet_wrap(~ Site)
@@ -309,7 +352,10 @@ ggplot(water) +
 ```{r warning = FALSE}
 ggplot(water) +
   aes(Date, Pct_BCoV) +
-  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt", span = 0.75,
+              col = "darkgray", size = 1) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x",
+              col = "black", size = 1) +
   geom_point() +
   scale_y_log10() +
   facet_wrap(~ Site)
@@ -318,7 +364,10 @@ ggplot(water) +
 ```{r}
 ggplot(water %>% filter(!is.na(Total_Flow))) +
   aes(Total_Flow, AVG) +
-  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_smooth(method = "loess", se = FALSE, weight = "wt", span = 0.75,
+              col = "darkgray", size = 1) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x",
+              col = "black", size = 1) +
   geom_point() +
   scale_x_log10() +
   scale_y_log10() +
@@ -330,7 +379,7 @@ ggplot(water %>% filter(!is.na(Total_Flow))) +
 ```{r}
 roll7 <- function(x) {
   n7 <- min(length(x), 7)
-  x <- roll_mean(x, n7)
+  x <- roll_mean(x, n7, na.rm = TRUE)
   if(n7 > 1) {
     x <- c(rep(x[1], n7 - 1), x)
   }
@@ -360,7 +409,9 @@ write.csv(cases, file = "data/uhs_housing_cases.csv", row.names = FALSE)
 ggplot(cases) +
   aes(Date, Positive, col = Site, group = Site) +
   geom_point() +
-  geom_line()
+  geom_smooth(method = "loess", se = FALSE, size = 1, span = 0.5) +
+  scale_y_log10() +
+  ggtitle("Covid Cases on Campus")
 ```
 
 ```{r}
@@ -395,7 +446,7 @@ Now plot side by side cases and water meas over time, and consider time lags.
 ggplot(case_waters %>% 
          filter(assay %in% c("Positive", "N1", "N2", "AVG","PMMoV","Pct_BCoV"))) +
   aes(Date, values, col = Site) +
-  geom_smooth(method = "loess", se = FALSE, size = 1) +
+  geom_smooth(method = "loess", se = FALSE, size = 1, span = 0.5) +
   geom_point(alpha = 0.5) +
   scale_y_log10() +
   facet_grid(assay ~ Site, scales = "free")
@@ -407,7 +458,7 @@ ggplot(case_waters %>%
          filter(assay %in% c("Positive", "AVG"),
                 Site %in% c("UW-LakeShore", "UW-Sellery"))) +
   aes(Date, values, col = Site) +
-  geom_smooth(method = "loess", se = FALSE, size = 1) +
+  geom_smooth(method = "loess", se = FALSE, size = 1, span = 0.5) +
   geom_point(alpha = 0.5) +
   scale_y_log10() +
   facet_grid(assay ~ Site, scales = "free")
