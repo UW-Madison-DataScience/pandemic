@@ -39,7 +39,7 @@ These could be calculated, but we did not provide them
 
 **NOTE:** `AVG` is recalculated below to be the _geometric_ mean of `N1` and `N2` rather than the _arithmetic_ mean due to the scale range and need for log transform (much like pH). With missing data, `AVG` is set to the non-missing value, and is downweighted in analysis.
 
-The MMSD sites are (I think) sewage pumping stations in the [MMSD Service Area](https://www.madsewer.org/About-Us/Service-Area) (see interactive map). P2 and P8 are closest to south side of campus.
+The MMSD sites are (I think) sewage pumping stations in the [MMSD Service Area](https://www.madsewer.org/About-Us/Service-Area) (see interactive map or map below). P2 and P8 are closest to south side of campus.
 
 - P2: Brittingham Park (S Park St & E Washington Ave)
 - P7: W Monona (W Broadway & Yahara River)
@@ -51,6 +51,8 @@ Analysis below includes plots with smooth trends followed by straight line trend
 
 This document summarizes quarantine information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/wastewater.Rmd).
 
+
+![Sewer Main Map](data/wastewater/SewerMainMap.pdf)
 
 ```{r}
 library(tidyverse)
