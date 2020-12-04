@@ -1,0 +1,294 @@
+---
+title: "Cornell Simulations"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+These data are simulation summaries for Cornell model used in <https://data-viz.it.wisc.edu/cornell-parameter-sweep/>.
+
+```{r}
+library(tidyverse)
+library(RPostgres)
+library(odbc)
+library(DBI)
+library(skimr)
+library(broom)
+kprint <- function(x) {
+  if(interactive()) {
+    print(x)
+  } else {
+    options(knitr.kable.NA = '')
+    knitr::kable(x)
+  }
+} 
+```
+
+```{r}
+info <- scan("data/cornell.txt", "text")
+con <- dbConnect(RPostgres::Postgres(),
+                 dbname = "test",
+                 host = info[1],
+                 port = 5432,
+                 user = "postgres",
+                 password = info[2])
+```
+
+
+```{r}
+# Metrics with sim_id and group_number 
+metrics <- dbGetQuery(con, 'Select * from metrics') %>% 
+  as_tibble() %>% 
+  pivot_longer(cols = -c(sim_id, group_number), 
+               names_to = "metric_name", 
+               values_to = "metric_value")
+```
+
+```{r}
+## Parameters for each simulation 
+all_params <-
+  tbl(con, "group_params") %>%
+  distinct() %>%
+  collect() %>% 
+  mutate(across(where(bit64::is.integer64), as.numeric))
+
+all_params_wide <-
+  all_params %>%
+  select(-`_scenario_name`) %>%
+  pivot_wider(id_cols = sim_id,
+              names_from = group_number,
+              values_from = c(everything(), -sim_id, -group_number)) %>%
+  mutate(across(everything(), ~ as.factor(.x)))
+```
+
+```{r}
+skim_df <- 
+  all_params_wide %>% 
+  skimr::skim() %>% 
+  filter(factor.n_unique > 1)
+```
+
+```{r}
+tmpfn <- function(x, y = "", sym = "%", space = " ") {
+  paste0(y, space, 100 * signif(as.numeric(as.character(x)), 2), sym)
+}
+```
+
+
+```{r}
+Groups <- c("UG_on", "UG_off", "Grad_res", "Grad_tea",
+                   "Staff_tea", "Staff_res", "Staff_off", "Community")
+dat <- metrics %>% 
+         mutate(metric_name = make.names(metric_name)) %>%
+         pivot_wider(names_from = "metric_name", values_from = "metric_value") %>% 
+         left_join(all_params_wide %>% 
+                     select(sim_id, skim_df$skim_variable),
+                   by = "sim_id") %>%
+  rename(contact_UG_on = "contact_rate_multiplier_0",
+         contact_UG_off = "contact_rate_multiplier_1",
+         contact_Grad_res = "contact_rate_multiplier_2",
+         contact_Grad_tea = "contact_rate_multiplier_3",
+         contact_Staff = "contact_rate_multiplier_4",
+         prev_UG_on = "initial_ID_prevalence_0",
+         prev_UG_off = "initial_ID_prevalence_1",
+         test_UG_on = "test_population_fraction_0",
+         test_UG_off = "test_population_fraction_1",
+         Group = "group_number") %>%
+  mutate(test_UG = factor(paste0(tmpfn(test_UG_on, "T+", "", ""), tmpfn(test_UG_off, "-", "", "")),
+                          c("T+7.1-0.29", "T+7.1-7.1", "T+14-0.29", "T+14-7.1", "T+29-0.29", "T+29-7.1")),
+         prev_UG = factor(paste0(tmpfn(prev_UG_on, "P+", "", ""), tmpfn(prev_UG_off, "-", "", "")),
+                          c("P+0.29-0.29", "P+0.29-3.3", "P+3.3-0.29", "P+3.3-3.3")),
+         test_UG_on = factor(tmpfn(test_UG_on, "T+", "", ""),
+                             c("T+7.1", "T+14", "T+29")),
+         test_UG_off = factor(tmpfn(test_UG_off, "T-", "", ""),
+                              c("T-0.29", "T-7.1")),
+         prev_UG_off = factor(tmpfn(prev_UG_off, "P-", "", ""),
+                              c("P-0.29", "P-3.3")),
+         prev_UG_on = factor(tmpfn(prev_UG_on, "P+", "", ""),
+                             c("P+0.29", "P+3.3")),
+         Group = factor(Groups[1 + as.integer(Group)], Groups))
+```
+
+```{r}
+ggplot(dat %>%
+         filter(contact_UG_on == 1.25,
+                contact_UG_off == 1,
+                contact_Grad_res == 1,
+                contact_Grad_tea == 1,
+                contact_Staff == 1)) +
+  aes(Time.of.peak.COVID.19.cases, Peak.active.cases,
+      col = Group) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x") +
+  scale_y_log10() +
+  facet_grid(test_UG ~ prev_UG) +
+  ggtitle("Prevalence by Test for all Groups at High Contact Rates")
+```
+
+```{r}
+ggplot(dat %>%
+         filter(contact_UG_off == 1,
+                contact_Grad_res == 1,
+                contact_Grad_tea == 1,
+                contact_Staff == 1)) +
+  aes(Time.of.peak.COVID.19.cases, Peak.active.cases,
+      col = prev_UG, group = prev_UG) +
+  geom_point() +
+  geom_line() +
+  scale_y_log10() +
+  facet_grid(test_UG ~ Group) +
+  ggtitle("Prevalence by Test for all Groups over On Campus Contact Rates")
+```
+Fit overall model with two-factor interactions. Many significant.
+Then fit model by group with two-factor interactions.
+
+```{r eval = FALSE}
+fits <- lm(log10(Peak.active.cases) ~
+             (Group + contact_UG_on + contact_UG_off +
+             contact_Grad_res + contact_Grad_tea +
+             contact_Staff + 
+             test_UG_on + test_UG_off +
+             prev_UG_on + prev_UG_off)^2, dat)
+fitss <- step(fits, trace = 0)
+tidy(anova(fitss))[, c("term","p.value")] %>%
+  mutate(p.value = round(p.value, 4),
+         p.value = ifelse(p.value > 0.05, NA, p.value)) %>%
+  filter(!is.na(p.value))
+```
+
+Table of P value * 10^4 if < 0.05, for main effects and 2-way interactions by group.
+
+```{r}
+fitfn <- function(dat) {
+  fits <- lm(log10(Peak.active.cases) ~
+             (contact_UG_on + contact_UG_off +
+             contact_Grad_res + contact_Grad_tea +
+             contact_Staff + 
+             test_UG + prev_UG)^2, dat)
+  step(fits, trace = 0) 
+}
+fit_group <- map(
+  split(dat, dat$Group),
+  fitfn)
+(aov_group <- bind_rows(
+  lapply(fit_group, function(x) tidy(anova(x))[,c("term","p.value")]),
+  .id = "Group") %>%
+  mutate(p.value = round(p.value, 4),
+         p.value = ifelse(p.value > 0.05, NA, p.value * 10000)) %>%
+  pivot_wider(names_from = "Group", values_from = "p.value") %>%
+  filter(term != "Residuals")) %>%
+  kprint()
+```
+```{r}
+group_plot <- function(dat, group_name, group_title) {
+  ggplot(dat %>%
+              filter(Group == group_name)) +
+    aes(contact_UG_on, Peak.active.cases,
+        col = test_UG_on, group = test_UG_on) +
+    geom_jitter(height = 0, width = 0.25) +
+    geom_smooth(method = "lm", se = FALSE, formula = "y ~ x") +
+    scale_y_log10() +
+    facet_grid(test_UG_off ~ prev_UG, scales = "free") +
+    ylab("Peak Active Cases") +
+    ggtitle(group_title)
+}
+```
+
+```{r}
+group_plot(dat, "UG_on", "UG On Campus")
+```
+
+```{r}
+group_plot(dat, "UG_off", "UG Off Campus")
+```
+
+```{r}
+group_plot(dat, "Grad_res", "Grad Researchers")
+```
+
+```{r}
+group_plot(dat, "Grad_tea", "Grad Instructors")
+```
+
+```{r}
+group_plot(dat, "Staff_tea", "Staff Instructors")
+```
+
+```{r}
+group_plot(dat, "Staff_res", "Staff Researchers")
+```
+
+```{r}
+group_plot(dat, "Staff_off", "Staff Off Campus")
+```
+
+```{r}
+group_plot(dat, "Community", "Madison Community")
+```
+
+#### Some investigation of Grad Instuctors Key Interactions
+
+It seems that `Grad_tea` and `Staff_tea` are different and simpler in their model, and that `contact_Grad_tea` interactions seem modest. Use fits to suggest interesting plots.
+
+```{r}
+ggplot(dat %>%
+         filter(Group == "Grad_tea",
+                contact_Grad_res == 1,
+                contact_Grad_tea == 1,
+                contact_Staff == 1)) +
+  aes(Time.of.peak.COVID.19.cases, Peak.active.cases,
+      col = contact_UG_on, shape = contact_UG_off, group = contact_UG_on) +
+  geom_point() +
+  geom_path() +
+  scale_y_log10() +
+  facet_grid(test_UG ~ prev_UG, scales = "free") +
+  ggtitle("Graduate Student Instuctors")
+```
+
+```{r}
+ggplot(dat %>%
+         filter(Group == "Grad_tea")) +
+  aes(prev_UG, Peak.active.cases,
+      col = contact_Staff) +
+  geom_boxplot() +
+  ggtitle("Graduate Student Instuctors")
+```
+```{r}
+fit <- lm(Peak.active.cases ~ contact_UG_on + contact_UG_off + 
+            contact_Grad_tea + test_UG,
+          dat %>%
+            filter(Group == "Grad_tea"))
+datr <- dat %>%
+  filter(Group == "Grad_tea") %>%
+  mutate(resid = resid(fit) + mean(Peak.active.cases),
+         prev_UG_on = str_remove(prev_UG_on, "prev_UG_on "),
+         prev_UG_off = str_remove(prev_UG_off, "prev_UG_off "))
+```
+
+```{r}
+ggplot(datr) +
+  aes(prev_UG_on, resid,
+      col = prev_UG_off) +
+  geom_boxplot() +
+  facet_wrap(~ paste0("contact_Staff ", contact_Staff)) +
+  ylab("Peak removing Main Effects") +
+  ggtitle("Graduate Student Instuctor Interaction")
+```
+
+```{r}
+ggplot(datr %>%
+         group_by(prev_UG_on, prev_UG_off, contact_Staff) %>%
+         summarize(resid = mean(resid), .groups = "drop")) +
+  aes(prev_UG_on, resid,
+      col = prev_UG_off, group = prev_UG_off) +
+  geom_point(size = 2) +
+  geom_line() +
+  facet_wrap(~ paste0("contact_Staff ", contact_Staff)) +
+  ylab("Peak removing Main Effects") +
+  ggtitle("Graduate Student Instuctor Interaction")
+
+```
+
+

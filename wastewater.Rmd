@@ -68,18 +68,22 @@ kprint <- function(...) {
 }
 ```
 
+```{r}
+filename <- "data/wastewater/WW SARS-COV-2 Data V3.xlsx"
+```
+
 ```{r warning = FALSE, message = FALSE}
 tmpfn <- function(N1, N2) {
   AVG <- sqrt(N1 * N2)
   AVG <- ifelse(is.na(N1), N2, AVG)
   ifelse(is.na(N2), N1, AVG)
 }
-water_MMSD <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
+water_MMSD <- read_excel(filename,
                     na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
                     col_types = c("text", "date", rep("numeric", 9), "text"),
                     sheet = 1) %>%
   rename(Comment = "...12")
-water_Interceptors <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
+water_Interceptors <- read_excel(filename,
                     na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
                     col_types = c("text", "date", rep("numeric", 8), "text"),
                     sheet = 2) %>%
@@ -89,10 +93,10 @@ water_Interceptors <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
          Site = ifelse(Site == "MMSD P07", "MMSD P7", Site),
          Site = ifelse(Site == "MMSD P08", "MMSD P8", Site)) %>%
   select(1:5, TSS, everything())
-water_UW_Dorms <- read_excel("data/wastewater/WW SARS-COV-2 Data V2.xlsx",
+water_UW_Dorms <- read_excel(filename,
                     na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
-                    col_types = c("text", "date", rep("numeric", 9), rep("text", 2)),
-                    sheet = 3)[,-13] %>%
+                    col_types = c("text", "date", rep("numeric", 9), rep("text", 1)),
+                    sheet = 3) %>%
   rename(Comment = "...12")
 water <- 
   bind_rows(water_MMSD,

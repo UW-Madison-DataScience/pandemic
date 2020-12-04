@@ -92,7 +92,8 @@ Read data, select columns, do initial cleaning. Focus on students on campus.
 
 ```{r}
 #filename <- "data/MasterQuery_WithHousing_20201120.csv"
-filename <- "data/MasterQuery_HousingSubset_20201120.csv"
+#filename <- "data/MasterQuery_HousingSubset_20201120.csv"
+filename <- "data/MasterQuery_HousingSubset_20201202.csv"
 cdc0 <- read.csv(filename, row.names = NULL) %>%
   select(PatientID, Group, hall_housingfile, House_Name, Room, Race,
          ResultDate, CollectionDate, ConfirmedDate, TracedDate,
