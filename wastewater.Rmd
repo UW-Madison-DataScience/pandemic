@@ -70,6 +70,7 @@ kprint <- function(...) {
 
 ```{r}
 filename <- "data/wastewater/WW SARS-COV-2 Data V3.xlsx"
+#filename <- "data/wastewater/UW and MMSD Report for SARS-Cov-2 Influent Samples 12.08.20vFinal.xlsx"
 ```
 
 ```{r warning = FALSE, message = FALSE}
@@ -78,13 +79,17 @@ tmpfn <- function(N1, N2) {
   AVG <- ifelse(is.na(N1), N2, AVG)
   ifelse(is.na(N2), N1, AVG)
 }
+missing_codes <- c("","NA","0","Undetected","Not Detected",
+                   "Field Parameters to be filled in", 
+                   "Inhibited-to be re-ran", "#DIV/0!")
+sheets <- excel_sheets(filename)
 water_MMSD <- read_excel(filename,
-                    na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
+                    na = missing_codes,
                     col_types = c("text", "date", rep("numeric", 9), "text"),
                     sheet = 1) %>%
   rename(Comment = "...12")
 water_Interceptors <- read_excel(filename,
-                    na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
+                    na = missing_codes,
                     col_types = c("text", "date", rep("numeric", 8), "text"),
                     sheet = 2) %>%
   rename(Comment = "...11") %>%
@@ -94,7 +99,7 @@ water_Interceptors <- read_excel(filename,
          Site = ifelse(Site == "MMSD P08", "MMSD P8", Site)) %>%
   select(1:5, TSS, everything())
 water_UW_Dorms <- read_excel(filename,
-                    na = c("","NA","0","Not Detected","Field Parameters to be filled in", "Inhibited-to be re-ran", "#DIV/0!"),
+                    na = missing_codes,
                     col_types = c("text", "date", rep("numeric", 9), rep("text", 1)),
                     sheet = 3) %>%
   rename(Comment = "...12")

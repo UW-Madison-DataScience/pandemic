@@ -1,0 +1,79 @@
+---
+title: "Wastewater MMSD"
+author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4)
+```
+
+This is just the MMSD Interceptor sites from the 12/08/2020 data sheet, with the last measurement being 12/1/2020. This document summarizes quarantine information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/wastewaterMMSD.Rmd).
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(broom)
+library(RcppRoll)
+kprint <- function(...) {
+  if(interactive()) {
+    print(...)
+  } else {
+    knitr::kable(...)
+  }
+}
+```
+
+```{r}
+filename <- "data/wastewater/UW and MMSD Report for SARS-Cov-2 Influent Samples 12.08.20vFinal.xlsx"
+```
+
+```{r warning = FALSE, message = FALSE}
+missing_codes <- c("","NA","0","Undetected","Not Detected",
+                   "Field Parameters to be filled in", 
+                   "Inhibited-to be re-ran", "#DIV/0!")
+water_MMSD <- read_excel(filename,
+                    na = missing_codes, skip = 12,
+                    col_types = c(rep("text", 4), rep("numeric", 4)),
+                    sheet = 4) %>%
+  select(-c(3,6,8)) %>%
+  rename(Date = "Collection Date",
+         Site = "Sample Description",
+         Qual = "Yes/No",
+         AVG = "Gene Copies / 1L...5",
+         PMMoV = "Gene Copies / 1L...7") %>%
+  mutate(Date = str_replace_all(Date, "\\.", "/")) %>%
+  filter(str_detect(Date, "\\/2020")) %>%
+  mutate(Date = as.Date(Date, format = "%m/%d/%Y"),
+         Site = str_remove(str_remove(Site, "MMSD Interceptor "), ". Sample.*"),
+         Site = ifelse(Site == "P11.", "P11", Site)) %>%
+  pivot_longer(AVG:PMMoV, names_to = "assay", values_to = "value")
+```
+
+```{r}
+ggplot(water_MMSD) +
+  aes(Date,value, col = Site) +
+  facet_wrap(~ assay, scales = "free_y") +
+  geom_point() +
+  scale_y_log10() +
+  geom_smooth(method = "loess", se = FALSE, formula = "y ~ x") +
+  ggtitle("MMSD Sites with Smooth Curves")
+```
+
+```{r}
+ggplot(water_MMSD) +
+  aes(Date,value, col = Site) +
+  facet_wrap(~ assay, scales = "free_y") +
+  geom_point() +
+  scale_y_log10() +
+  geom_smooth(aes(x = Date, y = value), method = "lm", se = FALSE, size = 1,
+              col = "black",
+              data = water_MMSD %>%
+                filter(Date >= max(Date) - 10)) +
+  ggtitle("MMSD Sites with Trend for Last 10 Days")
+```
+
+![Sewer Main Map](data/wastewater/SewerMainMap.pdf)
