@@ -27,7 +27,9 @@ kprint <- function(...) {
 ```{r}
 wicity <- read.csv("data/list-cities-wisconsin-200j.csv")
 herc <- read.csv("data/herc.csv")
-wwwi <- read_excel("data/wastewater/SARS-CoV-2 Project Data Compilation TO DHS w BCOV 201208.xlsx", col_types = c("text","date",rep("numeric",6))) %>%
+wwwi <- read_excel("data/wastewater/SARS-CoV-2 Project Data Compilation TO DHS w BCOV 201208.xlsx", 
+                   col_types = c("text","date",rep("numeric",6)),
+                   na = c("-","","0")) %>%
   rename(Date = "Collection Date",
          N1 = "N1: gc/1L",
          N2 = "N2: gc/1L",
@@ -169,3 +171,77 @@ herc_plot(wwwi, "GEO", "Southeast")
 ```{r}
 herc_plot(wwwi, "GEO", "Western")
 ```
+
+#### Look at individual cities
+
+Analysis above may be flawed by aggregating disparate cities or locations within a county. Just a beginning look at cities or other locations.
+
+```{r}
+city_plot <- function(wwwi, city_name) {
+  ggplot(wwwi %>% filter(Location == city_name, assay == "GEO")) +
+      aes(Date, value) +
+      scale_y_log10() +
+      geom_point(alpha = 0.5, size = 2) +
+      ggtitle(city_name) + 
+      geom_smooth(method = "loess", se = FALSE, formula = "y ~ x")
+}
+```
+
+```{r}
+city_plot(wwwi, "Appleton")
+```
+
+```{r}
+city_plot(wwwi, "Janesville")
+```
+
+
+```{r}
+city_plot(wwwi, "Kenosha")
+```
+
+```{r}
+city_plot(wwwi, "Madison")
+```
+
+```{r}
+city_plot(wwwi, "Manitowoc")
+```
+
+```{r}
+city_plot(wwwi, "Marshfield")
+```
+
+```{r}
+city_plot(wwwi, "Oshkosh")
+```
+
+```{r}
+city_plot(wwwi, "Platteville")
+```
+
+```{r}
+city_plot(wwwi, "River Falls")
+```
+
+```{r}
+city_plot(wwwi, "Sheboygan")
+```
+
+```{r}
+city_plot(wwwi, "Stevens Point")
+```
+
+```{r}
+city_plot(wwwi, "Sun Prairie")
+```
+
+```{r}
+city_plot(wwwi, "Viroqua")
+```
+
+```{r}
+city_plot(wwwi, "Whitewater")
+```
+
+
