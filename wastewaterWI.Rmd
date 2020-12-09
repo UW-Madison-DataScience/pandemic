@@ -1,0 +1,171 @@
+---
+title: "WasteWater Wisconsin"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4)
+```
+
+This document summarizes quarantine information. The R code file can be found in the [pandemic github repository](https://github.com/UW-Madison-DataScience/pandemic/blob/master/wastewaterWI.Rmd). The wastewater data is mostly at the city or smaller level; here it is aggregated to the county within HERC region. If a county has dramatic differences in levels across cities, that will go into the noise. There are also some issues with sites that don't correspond to cities I could identify (Red Cloud, Wolf) and some dates that were missing.
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(broom)
+library(RcppRoll)
+kprint <- function(...) {
+  if(interactive()) {
+    print(...)
+  } else {
+    knitr::kable(...)
+  }
+}
+```
+
+```{r}
+wicity <- read.csv("data/list-cities-wisconsin-200j.csv")
+herc <- read.csv("data/herc.csv")
+wwwi <- read_excel("data/wastewater/SARS-CoV-2 Project Data Compilation TO DHS w BCOV 201208.xlsx", col_types = c("text","date",rep("numeric",6))) %>%
+  rename(Date = "Collection Date",
+         N1 = "N1: gc/1L",
+         N2 = "N2: gc/1L",
+         AVG = "Average gc/1L (N1 and N2)",
+         PMMoV = "PMMoV: gc/1L",
+         BCoV = "BCoV:  AVG % Recovery") %>%
+  mutate(GEO = sqrt(N1 * N2),
+         GEO = ifelse(is.na(N1), N2, GEO),
+         GEO = ifelse(is.na(N2), N1, GEO)) %>%
+  pivot_longer(N1:GEO, names_to = "assay", values_to = "value") %>%
+  filter(!is.na(value),
+         !is.na(Date)) %>%
+  mutate(Location = ifelse(Location == "Jansewille", "Janesville", Location),
+         Location = ifelse(Location == "Sun Praire", "Sun Prairie", Location),
+         Location = ifelse(str_detect(Location, "MMSD"), "Madison", Location))
+```
+
+```{r}
+wwwi <- wwwi %>%
+  mutate(County = match(Location, wicity$City),
+         County = ifelse(is.na(County), "Unknown", wicity$County.ies[County]),
+         HERC = match(County, herc$county),
+         HERC = ifelse(is.na(HERC), NA, herc$herc_region[HERC]))
+```
+
+```{r}
+ggplot(wwwi) +
+  aes(Date, value) +
+  facet_grid(HERC ~ assay, scales = "free") +
+  scale_y_log10() +
+  geom_point(alpha = 0.25) +
+  geom_smooth(method = "loess", se = FALSE, formula = "y ~ x")
+```
+
+```{r}
+ggplot(wwwi %>% 
+         filter(assay == "AverageFlowRate",
+                !is.na(HERC))) +
+  aes(Date, value, col = County, group = County) +
+  facet_wrap(~ HERC, scales = "free_y") +
+  scale_y_log10() +
+  geom_point(alpha = 0.25) +
+  theme(legend.position = "none") +
+  geom_smooth(method = "loess", se = FALSE, formula = "y ~ x") +
+  ggtitle("Counties within HERC Region for AverageFlowRate")
+```
+
+```{r}
+ggplot(wwwi %>% 
+         filter(assay == "BCoV",
+                !is.na(HERC))) +
+  aes(Date, value, col = County, group = County) +
+  facet_wrap(~ HERC, scales = "free_y") +
+  scale_y_log10() +
+  geom_point(alpha = 0.25) +
+  theme(legend.position = "none") +
+  geom_smooth(method = "loess", se = FALSE, formula = "y ~ x") +
+  ggtitle("Counties within HERC Region for BCoV")
+```
+
+```{r}
+ggplot(wwwi %>% 
+         filter(assay == "PMMoV",
+                !is.na(HERC))) +
+  aes(Date, value, col = County, group = County) +
+  facet_wrap(~ HERC, scales = "free_y") +
+  scale_y_log10() +
+  geom_point(alpha = 0.25) +
+  theme(legend.position = "none") +
+  geom_smooth(method = "loess", se = FALSE, formula = "y ~ x") +
+  ggtitle("Counties within HERC Region for PMMoV")
+```
+
+```{r}
+ggplot(wwwi %>% 
+         filter(assay == "GEO",
+                !is.na(HERC))) +
+  aes(Date, value, col = County, group = County) +
+  facet_wrap(~ HERC, scales = "free_y") +
+  scale_y_log10() +
+  geom_point(alpha = 0.25) +
+  theme(legend.position = "none") +
+  geom_smooth(method = "loess", se = FALSE, formula = "y ~ x") +
+  ggtitle("Counties within HERC Region for GEO")
+```
+
+
+```{r}
+herc_plot <- function(wwwi, assay_name = "GEO", herc_name = "Fox Valley Area",
+                      trend = 28) {
+  
+  p <- ggplot(wwwi %>%
+                filter(assay == assay_name,
+                       HERC == herc_name)) +
+    aes(Date, value, col = County, group = County) +
+    scale_y_log10() +
+    geom_point(alpha = 0.5, size = 2) +
+    ggtitle(paste("HERC", herc_name, " Assay ", assay_name))
+  
+#  if(trend > 0) {
+    p <- p + 
+      geom_smooth(aes(x = Date, y = value), method = "lm", se = FALSE, size = 2,
+                  data = wwwi %>%
+                filter(assay == assay_name,
+                       HERC == herc_name,
+                       Date >= max(Date) - trend * 86400))
+#  } else {
+    p <- p +
+      geom_smooth(method = "loess", se = FALSE, formula = "y ~ x")
+#  }
+  p  
+}
+```
+
+```{r}
+herc_plot(wwwi, "GEO", "Fox Valley Area")
+```
+
+```{r}
+herc_plot(wwwi, "GEO", "North Central")
+```
+
+```{r}
+herc_plot(wwwi, "GEO", "Northeast")
+```
+
+```{r}
+herc_plot(wwwi, "GEO", "Northwest")
+```
+
+```{r}
+herc_plot(wwwi, "GEO", "South Central")
+```
+
+```{r}
+herc_plot(wwwi, "GEO", "Southeast")
+```
+
+```{r}
+herc_plot(wwwi, "GEO", "Western")
+```
