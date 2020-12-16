@@ -267,6 +267,33 @@ timefit(waters %>%
 \newpage
 \ 
 
+### Conductivity
+
+```{r}
+dat <- waters %>% 
+  filter(assay %in% c("AVG", "Conductivity")) %>%
+  pivot_wider(names_from = "assay", values_from = "values") %>%
+  filter(!is.na(AVG), !is.na(Conductivity))
+ggplot(dat) +
+  aes(Conductivity, AVG) +
+  geom_smooth(method = "lm", se = FALSE, weight = "wt", formula = "y ~ x") +
+  geom_point(alpha = 0.5) +
+  scale_x_log10() +
+  scale_y_log10() +
+  facet_wrap(~ Site, scales = "free")
+```
+
+```{r}
+fit <- lm(AVG ~ Conductivity * Site, data = dat)
+anova(fit)
+fit <- lm(AVG ~ Conductivity + Site, data = dat)
+drop1(fit, fit, test = "F")
+```
+
+
+\newpage
+\ 
+
 ### PMMoV and Pct_BCoV
 
 ```{r}
