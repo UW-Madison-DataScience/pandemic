@@ -1,0 +1,509 @@
+---
+title: "Wastewater"
+author: "`r paste('Brian Yandell,', format(Sys.time(), '%d %B %Y'))`"
+output:
+  word_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      fig.width = 7, fig.height = 4)
+```
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(broom)
+library(RcppRoll)
+kprint <- function(...) {
+  if(interactive()) {
+    print(...)
+  } else {
+    knitr::kable(...)
+  }
+}
+```
+
+This is my quick analysis of the data you provide today. I show linear (dashed) and smooth (solid) trends with data on geometric (log10) scale. Caveats I think (Martin correct if I am off base):
+
+- GEO uses N2 values that are suspect and being revisited and remeasured in coming weeks.
+- Flow adjustment done for MMSD based on measurements, but approximated for UW.
+- Visual attempt to look at relationship of PMMoV to GEO.
+- Analysis of covariance considers (linear) time and site only for previous 14 (MMSD) or 28 (UW) days.
+
+**Notes:**
+
+- For MMSD, GEO shows a 10+ fold rise starting in late November, while PMMoV shows 3 fold rise. This suggests an increase in COVID signal relative to PMMoV around Thanksgiving time (and following Halloween, football, etc.).
+- There appears to be increasing variability in GEO with increasing PMMoV signal, although challenging to separate that from trends.
+- Sellery with a single population seems to show clearer signal that LakeShore, which draws from multiple buildings.
+
+```{r}
+# Linked to most current version on command line
+filename <- "data/wastewater/UW_MMSD.xlsx"
+```
+
+```{r}
+spanw <- 0.75
+```
+
+```{r warning = FALSE, message = FALSE}
+tmpfn <- function(N1, N2) {
+  AVG <- sqrt(N1 * N2)
+  AVG <- ifelse(is.na(N1), N2, AVG)
+  ifelse(is.na(N2), N1, AVG)
+}
+missing_codes <- c("","NA","0","Undetected","Not Detected",
+                   "Field Parameters to be filled in", 
+                   "Inhibited-to be re-ran", "#DIV/0!")
+sheets <- excel_sheets(filename)
+water_MMSD <- read_excel(filename,
+                    na = missing_codes,
+                    skip = 12,
+                    col_types = c(rep("text", 4), rep("numeric", 4)),
+                    sheet = "MMSD") %>%
+  select(-c(3,6,8)) %>%
+  rename(Date = "Collection Date",
+         Description = "Sample Description",
+         QC = "Yes/No",
+         GEO = "Gene Copies / 1L...5",
+         PMMoV = "Gene Copies / 1L...7") %>%
+  mutate(Site = "MMSD")
+
+water_Interceptors <- read_excel(filename,
+                    na = missing_codes,
+                    skip = 12,
+                    col_types = c(rep("text", 4), rep("numeric", 4)),
+                    sheet = "MMSD Interceptor") %>%
+  select(-c(3,6,8)) %>%
+  rename(Date = "Collection Date",
+         Description = "Sample Description",
+         QC = "Yes/No",
+         GEO = "Gene Copies / 1L...5",
+         PMMoV = "Gene Copies / 1L...7") %>%
+  mutate(Site = str_remove(str_remove(Description, "^.*Interceptor "), "\\.+ +Sample.*")) %>%
+  filter(!is.na(Site),
+         Site %in% c("P2","P7","P8","P11","P18"))
+
+water_UW_LakeShore <- read_excel(filename,
+                    na = missing_codes,
+                    skip = 12,
+                    col_types = c(rep("text", 4), rep("numeric", 4)),
+                    sheet = "UW-D") %>%
+  select(-c(3,6,8)) %>%
+  rename(Date = "Collection Date",
+         Description = "Sample Description",
+         QC = "Yes/No",
+         GEO = "Gene Copies / 1L...5",
+         PMMoV = "Gene Copies / 1L...7") %>%
+  mutate(Site = "UW-LakeShore")
+
+water_UW_Sellery <- read_excel(filename,
+                    na = missing_codes,
+                    skip = 12,
+                    col_types = c(rep("text", 4), rep("numeric", 4)),
+                    sheet = "UW-S") %>%
+  select(-c(3,6,8)) %>%
+  rename(Date = "Collection Date",
+         Description = "Sample Description",
+         QC = "Yes/No",
+         GEO = "Gene Copies / 1L...5",
+         PMMoV = "Gene Copies / 1L...7") %>%
+  mutate(Site = "UW-Sellery")
+
+water <- 
+  bind_rows(water_MMSD,
+            water_Interceptors,
+            water_UW_LakeShore,
+            water_UW_Sellery) %>%
+  mutate(Date = as.Date(Date, format = "%m.%d.%Y")) %>%
+  filter(!is.na(Date),
+         Date > as.Date("2020-09-01"))
+```
+
+```{r}
+waters <- water %>%
+  pivot_longer(GEO:PMMoV, names_to = "assay", values_to = "values") %>%
+  filter(!is.na(values))
+```
+
+```{r}
+predfn <- function(x) {
+  x$pred <- 10^predict(lm(log10(values) ~ Date + Site, x))
+  x
+}
+addpred <- function(x) {
+  bind_rows(
+    map(
+      split(x, x$assay),
+      predfn),
+    .id = "assay")
+}
+```
+
+```{r}
+fitfn <- function(x, add = FALSE, ...) {
+  if(add) {
+    form <- formula(log10(values) ~ Date + Site)
+    elems <- 2:3
+    test <- "drop1"
+  } else {
+    form <- formula(log10(values) ~ Date * Site)
+    elems <- 3
+    test <- "anova"
+  }
+  fit <- lm(form, x)
+  out <- switch(test,
+         anova = broom::tidy(anova(fit)[elems,]),
+         drop1 = broom::tidy(drop1(fit, fit, test = "F")[elems,])) %>%
+    select(term, statistic, p.value) %>%
+    mutate(statistic = round(statistic, 2),
+           p.value = signif(p.value, 3))
+  if(!add) {
+    out <- out %>%
+      mutate(SD = signif(sigma(fit), 3))
+  }
+  out
+}
+sumfn <- function(x, ...) {
+  bind_rows(
+    map(
+      split(x, x$assay),
+      fitfn, ...),
+    .id = "assay") %>%
+    arrange(term, assay)
+}
+timefit <- function(x) {
+  out <- bind_rows(
+    sumfn(x, TRUE),
+    sumfn(x)) %>%
+  select(-statistic)
+  SD <- out %>%
+    select(assay, SD) %>%
+    filter(!is.na(SD))
+  out <- out %>%
+    select(-SD) %>%
+    pivot_wider(names_from = "term", values_from = "p.value")
+  full_join(out, SD) %>%
+    kprint()
+}
+```
+
+### All Sites
+
+```{r warning = FALSE}
+ggplot(waters) +
+  aes(Date, values) +
+  geom_smooth(method = "loess", se = FALSE, formula = "y ~ x", col = "darkgray") +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_grid(assay ~ Site, scales = "free_y")
+```
+
+\newpage
+\ 
+
+### MMSD Composite
+
+```{r warning = FALSE}
+ggplot(waters %>% filter(Site %in% c("MMSD"))) +
+  aes(Date, values) +
+  geom_smooth(method = "loess", se = FALSE,
+              formula = "y ~ x", span = spanw) +
+  geom_point(alpha = 0.5, size = 2) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y") +
+  ggtitle("MMSD Composite")
+```
+
+```{r warning = FALSE}
+ggplot(water %>% filter(Site %in% c("MMSD"))) +
+  aes(PMMoV, GEO, col = Date) +
+  geom_smooth(method = "lm", se = FALSE,
+              formula = "y ~ x", span = spanw, linetype = "dashed") +
+  geom_smooth(method = "loess", se = FALSE,
+              formula = "y ~ x", span = spanw) +
+  geom_point(alpha = 0.5, size = 2) +
+  scale_x_log10() +
+  scale_y_log10() +
+  facet_wrap(~ Site, scales = "free") +
+  ggtitle("MMSD Composite")
+```
+
+\newpage
+\ 
+
+### MMSD 5 Sites
+
+```{r warning = FALSE}
+ggplot(waters %>% filter(Site %in% c("P2","P7","P8","P11","P18"))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "loess", se = FALSE,
+              formula = "y ~ x", span = spanw) +
+  geom_point(alpha = 0.5, size = 2) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y") +
+  ggtitle("MMSD Interceptors")
+```
+
+```{r warning = FALSE}
+ggplot(water %>% filter(Site %in% c("P2","P7","P8","P11","P18"))) +
+  aes(PMMoV, GEO, col = Date) +
+  geom_smooth(method = "lm", se = FALSE,
+              formula = "y ~ x", span = spanw, linetype = "dashed") +
+  geom_smooth(method = "loess", se = FALSE,
+              formula = "y ~ x", span = spanw) +
+  geom_point(alpha = 0.5, size = 2) +
+  scale_x_log10() +
+  scale_y_log10() +
+  facet_wrap(~ Site, scales = "free")+
+  ggtitle("MMSD Interceptors")
+```
+
+```{r warning = FALSE}
+ggplot(water %>% filter(Site %in% c("P2","P7","P8","P11","P18"))) +
+  aes(PMMoV, GEO, col = Site) +
+  geom_smooth(method = "lm", se = FALSE,
+              formula = "y ~ x", span = spanw) +
+  geom_point(alpha = 0.5, size = 2) +
+  scale_x_log10() +
+  scale_y_log10()+
+  ggtitle("MMSD Interceptors")
+```
+
+\newpage
+\ 
+
+### Campus Sites
+
+```{r warning = FALSE}
+ggplot(waters %>% filter(str_detect(Site, "UW"))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(method = "loess", se = FALSE,
+              formula = "y ~ x", span = spanw) +
+  geom_point(alpha = 0.5, size = 2) +
+  scale_y_log10() +
+  facet_wrap(~ assay, scales = "free_y") +
+  ggtitle("Campus Sites")
+```
+
+```{r warning = FALSE}
+ggplot(water %>% filter(str_detect(Site, "UW"))) +
+  aes(PMMoV, GEO, col = Date) +
+  geom_smooth(method = "lm", se = FALSE,
+              formula = "y ~ x", span = spanw, linetype = "dashed") +
+  geom_smooth(method = "loess", se = FALSE,
+              formula = "y ~ x", span = spanw) +
+  geom_point(alpha = 0.5, size = 2) +
+  scale_x_log10() +
+  scale_y_log10() +
+  facet_wrap(~ Site, scales = "free") +
+  ggtitle("Campus Sites")
+```
+
+```{r warning = FALSE}
+ggplot(water %>% filter(str_detect(Site, "UW"))) +
+  aes(PMMoV, GEO, col = Site) +
+  geom_smooth(method = "lm", se = FALSE,
+              formula = "y ~ x", span = spanw, linetype = "dashed") +
+  geom_smooth(method = "loess", se = FALSE,
+              formula = "y ~ x", span = spanw) +
+  geom_point(alpha = 0.5, size = 2) +
+  scale_x_log10() +
+  scale_y_log10() +
+  ggtitle("Campus Sites")
+```
+
+## Analyses over time
+
+Tables show p-values (small values are more significant). SD is in log10 units.
+
+MMSD Interceptors Analysis of Covariance for Past 28 Days
+
+```{r}
+timefit(waters %>% 
+  filter(Site %in% c("P2","P7","P8","P11","P18"),
+         Date >= max(Date) - 28))
+```
+
+```{r}
+fit_cov <- function(waters, sites, window) {
+  tmp <- waters %>% 
+    filter(Site %in% sites,
+           Date >= max(Date) - window) %>%
+    pivot_wider(names_from = "assay", values_from = "values")
+  fit <- lm(log10(GEO) ~ PMMoV + Date + Site + Date + Site, tmp)
+  bind_rows(
+    broom::tidy(drop1(fit, fit, test = "F")[2:4,]) %>%
+      select(term, p.value) %>%
+      mutate(p.value = signif(p.value, 3)),
+    broom::tidy(anova(lm(log10(GEO) ~ PMMoV + Date + Site + PMMoV * Site, tmp))[4,]) %>%
+      select(term, p.value) %>%
+      mutate(p.value = signif(p.value, 3))) %>%
+    mutate(assay = "GEO") %>%
+    select(assay, everything()) %>%
+    pivot_wider(names_from = "term", values_from = "p.value") %>%
+    mutate(SD = signif(sigma(fit), 3)) %>%
+    kprint()
+}
+```
+
+```{r}
+fit_cov(waters, c("P2","P7","P8","P11","P18"), 14)
+```
+
+Campus Sites Analysis of Covariance for Past 28 Days
+
+```{r}
+timefit(waters %>% 
+          filter(str_detect(Site, "UW"),
+                 Date >= max(Date) - 28))
+```
+
+```{r}
+fit_cov(waters, c("UW-LakeShore","UW-Sellery"), 28)
+```
+
+```{r}
+knitr::knit_exit()
+```
+
+\newpage
+\ 
+
+### Conductivity
+
+```{r}
+dat <- waters %>% 
+  filter(assay %in% c("AVG", "Conductivity")) %>%
+  pivot_wider(names_from = "assay", values_from = "values") %>%
+  filter(!is.na(AVG), !is.na(Conductivity))
+ggplot(dat) +
+  aes(Conductivity, AVG) +
+  geom_smooth(method = "lm", se = FALSE, formula = "y ~ x") +
+  geom_point(alpha = 0.5) +
+  scale_x_log10() +
+  scale_y_log10() +
+  facet_wrap(~ Site, scales = "free")
+```
+
+```{r}
+fit <- lm(AVG ~ Conductivity * Site, data = dat)
+anova(fit)
+fit <- lm(AVG ~ Conductivity + Site, data = dat)
+drop1(fit, fit, test = "F")
+```
+
+\newpage
+\ 
+
+## Covid Cases
+
+Includes smooth curves and linear trend of previous four weeks.
+
+```{r}
+roll7 <- function(x) {
+  n7 <- min(length(x), 7)
+  x <- roll_mean(x, n7, na.rm = TRUE)
+  if(n7 > 1) {
+    x <- c(rep(x[1], n7 - 1), x)
+  }
+  x
+}
+cases <- "data/uhs_rand.csv"
+cases <- read.csv(cases) %>%
+  filter(Positive == 1,
+         Event == "CollectionDate") %>%
+  mutate(Date = as.Date(Date)) %>%
+  arrange(RANDID, Date) %>%
+  # Drop multiple positive tests
+  distinct(RANDID, .keep_all = TRUE) %>% 
+  # Focus on LakeShore and Sellery
+  rename(Site = "Neighborhood") %>%
+  mutate(Site = paste0("UW-", Site),
+         Site = ifelse(Site == "UW-SouthEast" & Hall_Name %in% c("Sellery","Witte"),
+                       paste0("UW-", Hall_Name), Site)) %>%
+  count(Date, Site, name = "Positive")
+```
+
+```{r}
+write.csv(cases, file = "data/uhs_housing_cases.csv", row.names = FALSE)
+```
+
+```{r}
+ggplot(cases) +
+  aes(Date, Positive, col = Site, group = Site) +
+  geom_point() +
+  geom_smooth(aes(y = Positive), method = "lm", se = FALSE, size = 1,
+              col = "black",
+              data = cases %>%
+                filter(Date >= max(Date) - 28)) +
+  geom_smooth(method = "loess", se = FALSE, size = 1, span = spanw) +
+  scale_y_log10() +
+  facet_wrap(~ Site) +
+  ggtitle("Covid Cases on Campus")
+```
+
+```{r}
+case_water <- 
+  full_join(
+    water %>%
+      select(-Comment, -pH, -Total_Flow) %>%
+      filter(Site %in% c("UW-LakeShore", "UW-Sellery")),
+    cases,
+    by = c("Date", "Site"))
+```
+
+```{r}
+write.csv(case_water, file = "data/uhs_housing_cases_water.csv", row.names = FALSE)
+```
+
+```{r}
+case_waters <- case_water %>%
+  select(Positive, Conductivity:Pct_BCoV, everything()) %>%
+  pivot_longer(Positive:Pct_BCoV, names_to = "assay", values_to = "values") %>%
+  filter(!is.na(values)) %>%
+  mutate(wt = ifelse(assay == "AVG", wt, 1)) %>%
+  arrange(Date) %>%
+  group_by(Site, assay) %>%
+  mutate(roll = roll7(values)) %>%
+  ungroup
+```
+
+Now plot side by side cases and water meas over time, and consider time lags.
+
+```{r fig.height = 10}
+ggplot(case_waters %>% 
+         filter(assay %in% c("Positive", "N1", "N2", 
+                             "AVG","PMMoV","Pct_BCoV"))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(aes(y = values), method = "lm", se = FALSE, size = 1,
+              col = "black",
+              data = case_waters %>% 
+         filter(assay %in% c("Positive", "N1", "N2",
+                             "AVG","PMMoV","Pct_BCoV"),
+                Date >= max(Date) - 28 * 86400)) +
+  geom_smooth(method = "loess", se = FALSE, size = 1, span = spanw) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_grid(assay ~ Site, scales = "free")
+```
+
+
+```{r}
+ggplot(case_waters %>% 
+         filter(assay %in% c("Positive", "AVG"),
+                Site %in% c("UW-LakeShore", "UW-Sellery"))) +
+  aes(Date, values, col = Site) +
+  geom_smooth(aes(y = values), method = "lm", se = FALSE, size = 1,
+              col = "black",
+              data = case_waters %>% 
+         filter(assay %in% c("Positive", "AVG"),
+                Site %in% c("UW-LakeShore", "UW-Sellery"),
+                Date >= max(Date) - 28 * 86400)) +
+  geom_smooth(method = "loess", se = FALSE, size = 1, span = spanw) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() +
+  facet_grid(assay ~ Site, scales = "free")
+```
