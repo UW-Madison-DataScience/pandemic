@@ -102,8 +102,10 @@ water_UW_Sellery <- read_excel(filename,
                     na = missing_codes,
                     skip = 12,
                     col_types = c(rep("text", 4), rep("numeric", 4)),
+#                    col_types = c(rep("text", 4), rep("numeric", 4), rep("text", 19)),
                     sheet = "UW-S") %>%
   select(-c(3,6,8)) %>%
+#  select(-c(3,6,8,9:27)) %>%
   rename(Date = "Collection Date",
          Description = "Sample Description",
          QC = "Yes/No",

@@ -1,0 +1,320 @@
+---
+title: "Cases and Wastewater"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, error = FALSE, message = FALSE)
+```
+
+```{r}
+library(tidyverse)
+library(RcppRoll)
+library(lubridate)
+library(patchwork)
+```
+
+```{r}
+abbrev_site <- function(x) {
+  x <- str_remove(x, " W[WP].*")
+  x <- str_remove(x, " MSD")
+  x <- str_remove(x, " Water &")
+  x <- str_remove(x, " Wastewater Utility")
+  abbreviate(x, 10)
+}
+```
+
+```{r}
+caseww <- full_join(
+  read_csv("data/wastewater/uwm_ww_data_20210507.csv") %>%
+    select(wwtp_name, sample_collect_date, capacity_mgd,
+           n1_sars_cov2_conc, n2_sars_cov2_conc,
+           ppmov_conc, hf183_conc, bcov_rec_rate,
+           average_flow_rate, equiv_sewage_amt) %>%
+    rename(Date = "sample_collect_date",
+           Site = "wwtp_name"),
+  read_csv("data/wastewater/uwm_case_data_20210507.csv") %>%
+    rename(Date = "SpecCollectedDate",
+           Site = "DISPLAY_NA"),
+  by = c("Site", "Date")) %>%
+  mutate(Site = abbrev_site(Site),
+         Day = factor(weekdays(Date), c("Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday")),
+         # Week 53 is the last week of the year bleeding into the next year
+         Week = epiweek(Date) + 53 * (2021 == year(Date) & epiweek(Date) < 53),
+         Week = Week + 1 - min(Week)) %>%
+  arrange(Site, Date)
+```
+
+```{r}
+ww <- caseww %>%
+  filter(!is.na(n1_sars_cov2_conc))
+case <- caseww %>%
+  filter(!is.na(cases))
+```
+
+
+```{r}
+rollo <- function(x, n = 7) {
+  nn <- min(length(x), n)
+  x <- roll_sum(x, nn, na.rm = TRUE)
+  if(nn > 1) {
+    x <- c(rep(x[1], nn - 1), x)
+  }
+  x
+}
+```
+
+```{r}
+ggplot(ww) +
+  aes(Day) +
+  geom_bar() +
+  facet_wrap(~ Site) +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ggtitle("Weekday of Wastewater Sample Collection")
+```
+
+```{r}
+ggplot(ww) +
+  aes(Week, Day) +
+  geom_jitter(width = 0, height = 0.1, alpha = 0.5) +
+  facet_wrap(~ Site) +
+  ggtitle("Week and Day of Wastewater Sample Collection")
+```
+
+```{r}
+ggplot(case) +
+  aes(Day) +
+  geom_bar() +
+  facet_wrap(~ Site) +
+  theme(axis.text.x = element_text(angle = 45)) +
+  ggtitle("Weekday of Cases")
+```
+
+```{r}
+ggplot(case) +
+  aes(Week, Day) +
+  geom_jitter(width = 0, height = 0.1, alpha = 0.5) +
+  facet_wrap(~ Site) +
+  ggtitle("Week and Day of Cases")
+```
+
+```{r}
+ggplot(ww) +
+  aes(Week,
+      n1_sars_cov2_conc) +
+  scale_y_log10() +
+  geom_line() +
+  facet_grid(Site ~ Day) +
+  theme(strip.text.y = element_text(angle = 0)) +
+  ggtitle("N1 by Week and Day")
+```
+
+```{r}
+ggplot(ww) +
+  aes(Date,
+      rollo(n1_sars_cov2_conc)) +
+  scale_y_log10() +
+  geom_line() +
+  facet_wrap(~ Site) +
+  ggtitle("N1 Rolling Mean by Date")
+```
+
+```{r}
+ggplot(case) +
+  aes(Week,
+      cases) +
+  geom_line() +
+  facet_grid(Site ~ Day, scales = "free_y") +
+  theme(strip.text.y = element_text(angle = 0)) +
+  ggtitle("Cases by Week and Day")
+```
+
+```{r}
+ggplot(case) +
+  aes(Week,
+      rollo(cases, 7)) +
+  geom_line() +
+  facet_grid(Site ~ Day, scales = "free_y") +
+  theme(strip.text.y = element_text(angle = 0)) +
+  ylab("Cases Rolling Week Mean") +
+  ggtitle("Rolling Mean of Cases by Week and Day")
+```
+
+```{r}
+ggplot(case) +
+  aes(Date,
+      rollo(cases)) +
+  geom_line() +
+  facet_wrap(~ Site, scales = "free_y") +
+   ylab("Cases Rolling Week Mean") +
+ ggtitle("Rolling Mean of Cases by Date")
+```
+
+## Burlington
+
+Brief look at one site. Note similarity of N1 and N2, odd point for PPMoV, and disparate trend for BCoV.
+
+```{r}
+burl <- caseww %>%
+  filter(Site == "Burlington") %>%
+  select(Week, cases, n1_sars_cov2_conc:bcov_rec_rate) %>%
+  group_by(Week) %>%
+  summarize(across(everything(), sum, na.rm = TRUE)) %>%
+  mutate(across(everything(), function(x) ifelse(x == 0, NA, x)))
+```
+
+```{r}
+ggplot(
+  burl %>%
+    pivot_longer(cases:bcov_rec_rate,
+                 names_to = "meas", values_to = "values") %>%
+    mutate(meas = factor(meas, 
+    c("cases", "n1_sars_cov2_conc", "n2_sars_cov2_conc",
+      "ppmov_conc", "bcov_rec_rate", "hf183_conc")))) +
+  aes(Week, values) +
+  geom_path() +
+  geom_point() +
+  facet_wrap(~ meas, scales = "free_y") +
+  ggtitle("Burlington")
+```
+
+```{r}
+coeff <- 1000
+ggplot(burl) +
+  aes(Week) +
+  geom_path(aes(y = n1_sars_cov2_conc / coeff), col = "red") +
+  geom_point(aes(y = n1_sars_cov2_conc / coeff), col = "red") +
+  geom_path(aes(y = cases), col = "blue") +
+  geom_point(aes(y = cases), col = "blue") +
+  scale_y_continuous(name = "Cases",
+#                     trans = "log10",
+                     sec.axis = sec_axis(~.*coeff, name = "N1")) +
+  theme(
+    axis.title.y = element_text(color = "blue"),
+    axis.title.y.right = element_text(color = "red")
+  ) +
+  ggtitle("Burlington: Weekly Cases and N1")
+```
+
+```{r}
+coeff <- 1000
+ggplot(caseww %>%
+  filter(Site == "Burlington")) +
+  aes(Date) +
+  geom_path(aes(y = rollo(n1_sars_cov2_conc / coeff)), col = "red") +
+  geom_point(aes(y = rollo(n1_sars_cov2_conc / coeff)), col = "red") +
+  geom_path(aes(y = rollo(cases)), col = "blue") +
+  geom_point(aes(y = rollo(cases)), col = "blue") +
+  scale_y_continuous(name = "Cases",
+#                     trans = "log10",
+                     sec.axis = sec_axis(~.*coeff, name = "N1")) +
+  theme(
+    axis.title.y = element_text(color = "blue"),
+    axis.title.y.right = element_text(color = "red")
+  ) +
+  ggtitle("Burlington: Rolling Week Sum of Cases and N1")
+```
+
+## All Sites by Week
+
+In these plots, N1 is rescaled to 1000 times the cases, which works for some less populated areas, but not for Milwaukee, Green Bay or Racine. Not that there is not a consistent scaling, which might reflect population differences as well as other characteristics of the samples in different locations.
+
+```{r fig.width = 7, fig.height = 10}
+coeff <- 1000
+ggplot(caseww %>%
+    select(Site, Week, cases, n1_sars_cov2_conc:bcov_rec_rate) %>%
+    group_by(Site, Week) %>%
+    summarize(across(everything(), sum, na.rm = TRUE)) %>%
+    mutate(across(everything(), function(x) ifelse(x == 0, NA, x)))) +
+  aes(Week) +
+  geom_path(aes(y = n1_sars_cov2_conc / coeff), col = "red") +
+  geom_point(aes(y = n1_sars_cov2_conc / coeff), col = "red") +
+  geom_path(aes(y = cases), col = "blue") +
+  geom_point(aes(y = cases), col = "blue") +
+  scale_y_continuous(name = "Cases",
+#                     trans = "log10",
+                     sec.axis = sec_axis(~.*coeff, name = "N1")) +
+  facet_wrap(~ Site, ncol = 3, scales = "free_y") +
+  theme(
+    axis.title.y = element_text(color = "blue"),
+    axis.title.y.right = element_text(color = "red")
+  ) +
+  ggtitle("All Sites: Weekly Cases and N1")
+```
+
+```{r fig.width = 7, fig.height = 10}
+coeff <- 1000
+ggplot(caseww %>%
+    select(Site, Date, cases, n1_sars_cov2_conc:bcov_rec_rate) %>%
+      arrange(Site, Date)) +
+  aes(Date) +
+  geom_path(aes(y = rollo(n1_sars_cov2_conc / coeff)), col = "red") +
+  geom_point(aes(y = rollo(n1_sars_cov2_conc / coeff)), col = "red") +
+  geom_path(aes(y = rollo(cases)), col = "blue") +
+  geom_point(aes(y = rollo(cases)), col = "blue") +
+  scale_y_continuous(name = "Cases",
+#                     trans = "log10",
+                     sec.axis = sec_axis(~.*coeff, name = "N1")) +
+  facet_wrap(~ Site, ncol = 3, scales = "free_y") +
+  theme(
+    axis.title.y = element_text(color = "blue"),
+    axis.title.y.right = element_text(color = "red")
+  ) +
+  ggtitle("All Sites: Rolling Week Sum of Cases and N1")
+```
+
+## All Sites by Week Rescaled
+
+These plots allow one to focus on the shape of the curves, and the time of the maxima. If N1 were a consistent lead indicator of cases, then the red peak should generally be to the left of the blue peak, which it is not.
+
+```{r fig.width = 7, fig.height = 10}
+coeff <- 1
+ggplot(
+  caseww %>%
+    select(Site, Week, cases, n1_sars_cov2_conc:bcov_rec_rate) %>%
+    group_by(Site, Week) %>%
+    summarize(across(everything(), sum, na.rm = TRUE)) %>%
+    mutate(across(everything(), function(x) ifelse(x == 0, NA, x))) %>%
+    group_by(Site) %>%
+    mutate(across(everything(), function(x) x / max(x, na.rm = TRUE)))) +
+  aes(Week) +
+  geom_path(aes(y = n1_sars_cov2_conc / coeff), col = "red") +
+  geom_point(aes(y = n1_sars_cov2_conc / coeff), col = "red") +
+  geom_path(aes(y = cases), col = "blue") +
+  geom_point(aes(y = cases), col = "blue") +
+  scale_y_continuous(name = "Cases",
+#                     trans = "log10",
+                     sec.axis = sec_axis(~.*coeff,
+                                         labels = NULL, name = "N1")) +
+  facet_wrap(~ Site, ncol = 3, scales = "free_y") +
+  theme(
+    axis.title.y = element_text(color = "blue"),
+    axis.title.y.right = element_text(color = "red")
+  ) +
+  ggtitle("All Sites: Weekly Cases and N1")
+```
+
+```{r fig.width = 7, fig.height = 10}
+coeff <- 1
+ggplot(caseww %>%
+    select(Site, Date, cases, n1_sars_cov2_conc:bcov_rec_rate) %>%
+      arrange(Site, Date) %>%
+    group_by(Site) %>%
+    mutate(across(-Date, rollo),
+           across(-Date, function(x) x / max(x, na.rm = TRUE)))) +
+  aes(Date) +
+  geom_path(aes(y = n1_sars_cov2_conc), col = "red") +
+  geom_point(aes(y = n1_sars_cov2_conc), col = "red") +
+  geom_path(aes(y = cases), col = "blue") +
+  geom_point(aes(y = cases), col = "blue") +
+  scale_y_continuous(name = "Cases",
+#                     trans = "log10",
+                     sec.axis = sec_axis(~.*coeff,
+                                         labels = NULL, name = "N1")) +
+  facet_wrap(~ Site, ncol = 3, scales = "free_y") +
+  theme(
+    axis.title.y = element_text(color = "blue"),
+    axis.title.y.right = element_text(color = "red")
+  ) +
+  ggtitle("All Sites: Rolling Week Sum of Cases and N1")
+```
