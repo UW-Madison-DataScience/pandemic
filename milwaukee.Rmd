@@ -64,6 +64,8 @@ rollo <- function(x, n = 7) {
 }
 ```
 
+Note that wastewater samples are on different days in different sites, and sometimes more than once in a week. Cases are measured most days, somewhat less on Sundays. It is difficult with this distribution of wastewater measurements to determine lead or lag in signal relative to cases.
+
 ```{r}
 ggplot(ww) +
   aes(Day) +
