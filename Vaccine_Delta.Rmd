@@ -1,0 +1,27 @@
+---
+title: "Vaccination and Delta Viral Load"
+author: "Brian Yandell"
+date: "8/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This build on work of the [AIDS Vaccine Research Laboratory](https://dholk.primate.wisc.edu/project/dho/public/manuscripts/published/viral-loads-in-vaccinees/begin.view?) for the manuscript [https://www.medrxiv.org/content/10.1101/2021.07.31.21261387v1](Vaccinated and unvaccinated individuals have similar viral loads in communities with a high prevalence of the SARS-CoV-2 delta variant).
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+```{r}
+tmpfile <- tempfile()
+utils::download.file("https://dholk.primate.wisc.edu/_webdav/dho/public/manuscripts/published/viral-loads-in-vaccinees/%40files/N1_Ct_values.xlsx", tmpfile)
+n1ct <- readxl::read_excel(tmpfile)
+unlink(tmpfile)
+rm(tmpfile)
+```
+
+
