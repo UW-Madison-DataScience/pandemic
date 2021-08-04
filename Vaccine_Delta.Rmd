@@ -18,10 +18,35 @@ library(readxl)
 
 ```{r}
 tmpfile <- tempfile()
-utils::download.file("https://dholk.primate.wisc.edu/_webdav/dho/public/manuscripts/published/viral-loads-in-vaccinees/%40files/N1_Ct_values.xlsx", tmpfile)
-n1ct <- readxl::read_excel(tmpfile)
+download.file("https://dholk.primate.wisc.edu/_webdav/dho/public/manuscripts/published/viral-loads-in-vaccinees/%40files/N1_Ct_values.xlsx", tmpfile)
+n1ct <- read_excel(tmpfile, na = c("", "NA"))
 unlink(tmpfile)
 rm(tmpfile)
+```
+
+```{r}
+n1ct <- n1ct %>%
+  mutate(Variant = (Pango == "B.1.617.2") & !is.na(Pango),
+         Variant = c("Other", "Delta")[1 + Variant],
+         Variant = ifelse(is.na(Pango), "Unknown", Variant),
+         Viral_Load = 2^(30 - N1),
+         Delta = Variant,
+         Delta = ifelse(Delta != "Delta", "Other/Variant", Delta),
+         Location = "Wisconsin") %>%
+  rename(Vaccinated = "Fully Vaccinated")
+```
+
+Would be helpful to identify to county, but HIPAA privacy restrictions prevents that.
+Otherwise `Location` column could be modified to "Dane Co" and "Other Co", for instance.
+
+```{r}
+ggplot(n1ct) +
+  aes(Vaccinated, N1, col = Pango) +
+  geom_boxplot(col = "gray") +
+  geom_jitter(width = 0.2) +
+  facet_grid(Location ~ Variant) +
+  scale_y_continuous(sec.axis = sec_axis(~ 2^(30-.), name = "Viral Load",
+                                         breaks = c(1,10,100, 1000, 10000)))
 ```
 
 
