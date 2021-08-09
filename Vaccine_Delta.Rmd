@@ -6,7 +6,7 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 ```
 
 This build on work of the [AIDS Vaccine Research Laboratory](https://dholk.primate.wisc.edu/project/dho/public/manuscripts/published/viral-loads-in-vaccinees/begin.view?) for the manuscript [https://www.medrxiv.org/content/10.1101/2021.07.31.21261387v1](Vaccinated and unvaccinated individuals have similar viral loads in communities with a high prevalence of the SARS-CoV-2 delta variant).
@@ -18,7 +18,9 @@ library(readxl)
 
 ```{r}
 tmpfile <- tempfile()
-download.file("https://dholk.primate.wisc.edu/_webdav/dho/public/manuscripts/published/viral-loads-in-vaccinees/%40files/N1_Ct_values.xlsx", tmpfile)
+download.file(
+  file.path("https://dholk.primate.wisc.edu/_webdav/dho/public/manuscripts/published/",
+  "viral-loads-in-vaccinees/%40files/N1_Ct_values.xlsx"), tmpfile)
 n1ct <- read_excel(tmpfile, na = c("", "NA"))
 unlink(tmpfile)
 rm(tmpfile)
@@ -49,4 +51,32 @@ ggplot(n1ct) +
                                          breaks = c(1,10,100, 1000, 10000)))
 ```
 
+Test for variant and vaccinated effects. Use location if more than one.
+
+```{r}
+if(n1ct %>% count(Location) %>% nrow() > 1) {
+  fit <- lm(N1 ~ Location * Variant * Vaccinated, n1ct)
+} else {
+  fit <- lm(N1 ~  Variant * Vaccinated, n1ct)
+}
+```
+
+```{r}
+drop1(fit, fit, test = "F")
+```
+
+Test for variant and vaccinated effects in samples with sequenced variant. Use location if more than one.
+
+```{r}
+n1ctna <- n1ct %>% filter(!is.na(Pango))
+if(n1ct %>% count(Location) %>% nrow() > 1) {
+  fitna <- lm(N1 ~ Location * Variant * Vaccinated, n1ctna)
+} else {
+  fitna <- lm(N1 ~  Variant * Vaccinated, n1ctna)
+}
+```
+
+```{r}
+drop1(fitna, fitna, test = "F")
+```
 
