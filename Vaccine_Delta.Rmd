@@ -85,6 +85,8 @@ drop1(fitna, fitna, test = "F")
 
 ## August 10 Symptom Dataset
 
+Symptom data. No information in these data about variant, days to symptom onset or infectiousness (cytopathic effects/CPE).
+
 ```{r}
 tmpfile <- tempfile()
 download.file(
