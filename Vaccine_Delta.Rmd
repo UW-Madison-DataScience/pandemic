@@ -1,7 +1,7 @@
 ---
 title: "Vaccination and Delta Viral Load"
 author: "Brian Yandell"
-date: "8/4/2021"
+date: "`r format(Sys.time(), '%d %B %Y')`"
 output: html_document
 ---
 
@@ -10,6 +10,19 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 ```
 
 This build on work of the [AIDS Vaccine Research Laboratory](https://dholk.primate.wisc.edu/project/dho/public/manuscripts/published/viral-loads-in-vaccinees/begin.view?) for the manuscript [https://www.medrxiv.org/content/10.1101/2021.07.31.21261387v1](Vaccinated and unvaccinated individuals have similar viral loads in communities with a high prevalence of the SARS-CoV-2 delta variant).
+
+## Comments on design
+
+- Would be useful to know something about variant for samples with N1 Ct values above 30. 
+  + If they are mostly not Delta, then it is a stronger case that Delta has high viral load. 
+  + If they have the same proportion of Delta as other samples with known variant, then there would be no evidence that Delta has a viral load. That is, the higher infectivity of Delta might be due to something else.
+  + Need not sequence all: take a random sample of, say, 100, with N1 > 30 to sequence.
+- Symptom data is not connected to earlier data.
+  + I connected them based on exact N1 match and Vaccinated match.
+  + Some samples had same N1 but different Vaccinated status.
+  + Some samples from first batch were not matched in second batch. See discrepancies below.
+
+## Setup for 31 July data (batch 1)
 
 ```{r}
 library(tidyverse)
@@ -40,6 +53,8 @@ n1ct <- n1ct %>%
          Location = "Wisconsin") %>%
   rename(Vaccinated = "Fully Vaccinated")
 ```
+
+## Plots and analysis of batch 1
 
 Would be helpful to identify to county, but HIPAA privacy restrictions prevents that.
 Otherwise `Location` column could be modified to "Dane Co" and "Other Co", for instance.
@@ -83,7 +98,7 @@ if(n1ct %>% count(Location) %>% nrow() > 1) {
 drop1(fitna, fitna, test = "F")
 ```
 
-## August 10 Symptom Dataset
+## Setup for August 10 Symptom Dataset (batch 2)
 
 Symptom data. No information in these data about variant, days to symptom onset or infectiousness (cytopathic effects/CPE).
 
@@ -114,7 +129,20 @@ ggplot(n1ctb ) +
                                          breaks = c(1,10,100, 1000, 10000)))
 ```
 
+## Comparison of batches 1 and 2
+
 Assume that identical N1 and Vaccinated are same samples.
+
+```{r}
+(mismatch <- 
+  full_join(
+    n1ct,
+    n1ctb,
+    by = c("N1")) %>%
+  filter(Vaccinated.x != Vaccinated.y)) %>%
+  select(N1,Pango,Variant,AnySymptoms,Vaccinated.x,Vaccinated.y) %>%
+  knitr::kable()
+```
 
 ```{r}
 n1ctc <- 
@@ -122,6 +150,21 @@ n1ctc <-
     n1ct,
     n1ctb,
     by = c("N1","Vaccinated"))
+```
+
+```{r}
+n1ctc %>%
+  mutate(naVariant = is.na(Variant),
+         naAnySymptoms = is.na(AnySymptoms)) %>%
+  count(naVariant, naAnySymptoms)
+```
+
+```{r}
+n1ctc %>%
+  filter(!is.na(Variant) & is.na(AnySymptoms))%>%
+  select(N1,Pango,Variant,AnySymptoms,Vaccinated) %>%
+  arrange(N1) %>%
+  knitr::kable()
 ```
 
 ```{r}
