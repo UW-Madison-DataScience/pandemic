@@ -17,10 +17,13 @@ library(readxl)
 ```
 
 ```{r}
+datadir <- "https://dholk.primate.wisc.edu/_webdav/dho/public/manuscripts/published/viral-loads-in-vaccinees/%40files"
+```
+
+```{r}
 tmpfile <- tempfile()
 download.file(
-  file.path("https://dholk.primate.wisc.edu/_webdav/dho/public/manuscripts/published/",
-  "viral-loads-in-vaccinees/%40files/N1_Ct_values.xlsx"), tmpfile)
+  file.path(datadir, "N1_Ct_values.xlsx"), tmpfile)
 n1ct <- read_excel(tmpfile, na = c("", "NA"))
 unlink(tmpfile)
 rm(tmpfile)
@@ -78,5 +81,56 @@ if(n1ct %>% count(Location) %>% nrow() > 1) {
 
 ```{r}
 drop1(fitna, fitna, test = "F")
+```
+
+## August 10 Symptom Dataset
+
+```{r}
+tmpfile <- tempfile()
+download.file(
+  file.path(datadir, "10Aug2021_N1_Ct_toshare.xlsx"), tmpfile)
+n1ctb <- read_excel(tmpfile, na = c("", "NA"))
+unlink(tmpfile)
+rm(tmpfile)
+```
+
+```{r}
+n1ctb <- n1ctb %>%
+  select(1:3) %>%
+  rename(N1 = "N1_Ct",
+         Vaccinated = "Fully Vaccinated") %>%
+  mutate(AnySymptoms = ifelse(is.na(AnySymptoms), NA, paste(AnySymptoms, "Symptoms")))
+```
+
+```{r}
+ggplot(n1ctb ) +
+  aes(Vaccinated, N1) +
+  geom_boxplot(col = "gray") +
+  geom_jitter(width = 0.2) +
+  facet_grid(~ AnySymptoms) +
+  scale_y_continuous(sec.axis = sec_axis(~ 2^(30-.), name = "Viral Load",
+                                         breaks = c(1,10,100, 1000, 10000)))
+```
+
+Assume that identical N1 and Vaccinated are same samples.
+
+```{r}
+n1ctc <- 
+  full_join(
+    n1ct,
+    n1ctb,
+    by = c("N1","Vaccinated"))
+```
+
+```{r}
+ggplot(n1ctc %>% 
+         filter(!is.na(AnySymptoms),
+                !is.na(Variant))) +
+  aes(Vaccinated, N1, col = Pango) +
+  geom_boxplot(col = "gray") +
+  geom_jitter(width = 0.2) +
+  facet_grid(AnySymptoms~ Variant) +
+  scale_y_continuous(sec.axis = sec_axis(~ 2^(30-.), name = "Viral Load",
+                                         breaks = c(1,10,100, 1000, 10000)))
 ```
 
