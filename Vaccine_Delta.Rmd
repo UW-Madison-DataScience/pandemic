@@ -9,7 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE, message = FALSE)
 ```
 
-This build on work of the [AIDS Vaccine Research Laboratory](https://dholk.primate.wisc.edu/project/dho/public/manuscripts/published/viral-loads-in-vaccinees/begin.view?) for the manuscript [https://www.medrxiv.org/content/10.1101/2021.07.31.21261387v1](Vaccinated and unvaccinated individuals have similar viral loads in communities with a high prevalence of the SARS-CoV-2 delta variant). This document source can be found at <https://github.com/UW-Madison-DataScience/pandemic/blob/master/Vaccine_Delta.Rmd>.
+This build on work of the [AIDS Vaccine Research Laboratory](https://dholk.primate.wisc.edu/project/dho/public/manuscripts/published/viral-loads-in-vaccinees/begin.view?) for the manuscript [https://www.medrxiv.org/content/10.1101/2021.07.31.21261387v3](Vaccinated and unvaccinated individuals have similar viral loads in communities with a high prevalence of the SARS-CoV-2 delta variant). This document source can be found at <https://github.com/UW-Madison-DataScience/pandemic/blob/master/Vaccine_Delta.Rmd>.
 
 ## Comments on design
 
