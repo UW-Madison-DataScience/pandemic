@@ -17,6 +17,7 @@ This build on work of the [AIDS Vaccine Research Laboratory](https://dholk.prima
   + If they are mostly not Delta, then it is a stronger case that Delta has high viral load. 
   + If they have the same proportion of Delta as other samples with known variant, then there would be no evidence that Delta has a viral load. That is, the higher infectivity of Delta might be due to something else.
   + Need not sequence all: take a random sample of, say, 100, with N1 > 30 to sequence.
+  + But unfortunately, it is not possible to reliably sequence above ct 30, so unfortunately that is unknowable. (DO)
 - Symptom data is not connected to earlier data.
   + I connected them based on exact N1 match and Vaccinated match.
   + Some samples had same N1 but different Vaccinated status.
